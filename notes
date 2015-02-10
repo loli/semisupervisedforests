@@ -1,0 +1,42 @@
+Next to do:
+    Check if still compiles.
+    Check what will happen to leave nodes, now that 0-label does not count... there should not be a probability for 0-label in the leaf node.
+    Try to enable a forest using the new criterium and train a few toy-examples using un-labeled samples (these should, together with entropy, simply not influende the tree training.)
+
+internal label naming:
+    Internally, the labels are continuously, starting from 0. Always the lowest label is assigned the 0-index. Therefore, I could define the lowest (possibly negative) label as the "unlabeled" signal (should be mostly -1 andf otherwise only positive labels).
+
+n_outputs:
+    Second values of y.shape, seldom used.. it seems to be like a parallel optimization towards to different output label sets.
+    Figure out, what exactly a second output means.
+    
+n_classes:
+    The number of classes in y. Actually a list of intp, as y can have two dimensions (see n_outputs).
+    
+label_count_stride:
+    =max(n_classes)
+    
+label_count_left/_right/_total:
+    Array of size double * (n_outputs * label_count_stride), e.g. double * (1 * 2) in my binary segmentation cases.
+    
+ClassificationCriterion.init
+    Before reaching this method, y is changes such, that the class ids are continuous and zero-based (!!!!!!!!!!) [Troublesome]
+    Sets label_count_total memory to 0 (better: only that many zeros as classes per n_output).
+    Counts appearences of each class (separatedly counted for each n_output) using label_count_total[k * label_count_stride + c] += w, where w is usually one (otherwise class appearances get already weighted here [therefore also double type used for label_count_ arrays]). That way, the later calculation of the entropy is speeded up manyfold.
+    
+ClassificationCriterion.update
+     Implementation assumes: start <= pos < new_pos <= end
+     Label occurences between pos and new_pos are counted, if required weighted by the sample_weight and then ADDED to the left as well as SUBSTRACTED form the right label_count_. Smooth!
+    
+Questions:
+    The implementation uses the trick to always simply shift the split point a little bit and shovel class appearances from the right side to the left (using the ClassificationCriterion.update method).
+    Can such an incrementally enhanced E-matrix be computed? Or would its computation have be repeated for each step? Otherwise, I might experience a serious slow-down.
+    
+Notes:
+    Semi-supervised forests can support multiple outputs (i.e. n_outputs > 1) only when sampels are consistently labeled or unlabeled accross outputs.
+    
+Maybe:
+    Interestingly, np.unique(y[:, 0], return_inverse=True) assigns the new 0-label always to the lowest original label.
+    Assuming that -1 (or lower negative number, but a fixed (!) one) defines the unlabeled samples, I can work internally with the 0-indexed label as unlabeled.
+    Make creation of label_count_left/_right/_total skip 0-based label.
+    Would have to keep track of something like n_labeled_samples_left, n_labeled_samples_right.

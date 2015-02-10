@@ -364,6 +364,296 @@ cdef class ClassificationCriterion(Criterion):
             dest += label_count_stride
             label_count_total += label_count_stride
 
+cdef class SemiSupervisedClassificationCriterion(ClassificationCriterion):
+    """Abstract semi-supervised criterion for classification."""
+
+    def __cinit__(self, SIZE_t n_outputs,
+                  np.ndarray[SIZE_t, ndim=1] n_classes):
+        # Default values
+        self.y = NULL
+        self.y_stride = 0
+        self.sample_weight = NULL
+
+        self.samples = NULL
+        self.start = 0
+        self.pos = 0
+        self.end = 0
+
+        self.n_outputs = n_outputs
+        self.n_node_samples = 0
+        self.weighted_n_node_samples = 0.0
+        self.weighted_n_left = 0.0
+        self.weighted_n_right = 0.0
+
+        self.label_count_left = NULL
+        self.label_count_right = NULL
+        self.label_count_total = NULL
+
+        # Count labels for each output
+        self.n_classes = NULL
+        safe_realloc(&self.n_classes, n_outputs)
+
+        cdef SIZE_t k = 0
+        cdef SIZE_t label_count_stride = 0
+        cdef SIZE_t n_classes_k = 0
+
+        for k in range(n_outputs):
+            n_classes_k = n_classes[k] - 1 # remove 0-class (unlabeled samples)
+            self.n_classes[k] = n_classes_k
+
+            if n_classes_k > label_count_stride:
+                label_count_stride = n_classes_k
+
+        self.label_count_stride = label_count_stride
+
+        # Allocate counters
+        cdef SIZE_t n_elements = n_outputs * label_count_stride
+        self.label_count_left = <double*> calloc(n_elements, sizeof(double))
+        self.label_count_right = <double*> calloc(n_elements, sizeof(double))
+        self.label_count_total = <double*> calloc(n_elements, sizeof(double))
+
+        # Check for allocation errors
+        if (self.label_count_left == NULL or
+                self.label_count_right == NULL or
+                self.label_count_total == NULL):
+            raise MemoryError()
+
+    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride,
+                   DOUBLE_t* sample_weight, double weighted_n_samples,
+                   SIZE_t* samples, SIZE_t start, SIZE_t end) nogil:
+        """Initialize the criterion at node samples[start:end] and
+           children samples[start:start] and samples[start:end]."""
+        # Initialize fields
+        self.y = y
+        self.y_stride = y_stride
+        self.sample_weight = sample_weight
+        self.samples = samples
+        self.start = start
+        self.end = end
+        self.n_node_samples = end - start
+        self.weighted_n_samples = weighted_n_samples
+        cdef double weighted_n_node_samples = 0.0
+
+        # Initialize label_count_total and weighted_n_node_samples
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_total = self.label_count_total
+
+        cdef SIZE_t i = 0
+        cdef SIZE_t p = 0
+        cdef SIZE_t k = 0
+        cdef SIZE_t c = 0
+        cdef DOUBLE_t w = 1.0
+        cdef SIZE_t offset = 0
+
+        for k in range(n_outputs):
+            memset(label_count_total + offset, 0,
+                   n_classes[k] * sizeof(double))
+            offset += label_count_stride
+
+        for p in range(start, end):
+            i = samples[p]
+
+            if sample_weight != NULL:
+                w = sample_weight[i]
+
+            c = <SIZE_t> y[i * y_stride]            
+            if c > 0: # don't consider unlabeled samples; assuming that sample is either for all outputs unlabeled or for all labeled
+                label_count_total[k * label_count_stride + c] += w
+                
+                for k in range(1, n_outputs):
+                    c = <SIZE_t> y[i * y_stride + k]
+                    label_count_total[k * label_count_stride + c] += w
+                
+                weighted_n_node_samples += w
+
+        self.weighted_n_node_samples = weighted_n_node_samples
+
+        # Reset to pos=start
+        self.reset()
+
+    cdef void reset(self) nogil:
+        """Reset the criterion at pos=start."""
+        self.pos = self.start
+
+        self.weighted_n_left = 0.0
+        self.weighted_n_right = self.weighted_n_node_samples
+
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_total = self.label_count_total
+        cdef double* label_count_left = self.label_count_left
+        cdef double* label_count_right = self.label_count_right
+
+        cdef SIZE_t k = 0
+
+        for k in range(n_outputs):
+            memset(label_count_left, 0, n_classes[k] * sizeof(double))
+            memcpy(label_count_right, label_count_total,
+                   n_classes[k] * sizeof(double))
+
+            label_count_total += label_count_stride
+            label_count_left += label_count_stride
+            label_count_right += label_count_stride
+
+    cdef void update(self, SIZE_t new_pos) nogil:
+        """Update the collected statistics by moving samples[pos:new_pos] from
+            the right child to the left child."""
+        cdef DOUBLE_t* y = self.y
+        cdef SIZE_t y_stride = self.y_stride
+        cdef DOUBLE_t* sample_weight = self.sample_weight
+
+        cdef SIZE_t* samples = self.samples
+        cdef SIZE_t pos = self.pos
+
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_total = self.label_count_total
+        cdef double* label_count_left = self.label_count_left
+        cdef double* label_count_right = self.label_count_right
+
+        cdef SIZE_t i = 0
+        cdef SIZE_t p = 0
+        cdef SIZE_t c = 0
+        cdef SIZE_t k = 0
+        cdef SIZE_t label_index
+        cdef DOUBLE_t w = 1.0
+        cdef DOUBLE_t diff_w = 0.0
+
+        # Note: We assume start <= pos < new_pos <= end
+
+        for p in range(pos, new_pos):
+            i = samples[p]
+
+            if sample_weight != NULL:
+                w = sample_weight[i]
+
+            c = <SIZE_t> y[i * y_stride]
+            if c > 0: # don't consider unlabeled samples; assuming that sample is either for all outputs unlabeled or for all labeled
+                label_index = k * label_count_stride + c
+                label_count_left[label_index] += w
+                label_count_right[label_index] -= w
+                
+                for k in range(1, n_outputs):
+                    label_index = (k * label_count_stride +
+                                   <SIZE_t> y[i * y_stride + k])
+                    label_count_left[label_index] += w
+                    label_count_right[label_index] -= w
+    
+                diff_w += w
+
+        self.weighted_n_left += diff_w
+        self.weighted_n_right -= diff_w
+
+        self.pos = new_pos
+
+#     def __cinit__(self, SIZE_t n_outputs,
+#                   np.ndarray[SIZE_t, ndim=1] n_classes): # parent __cinit__ always called
+#         # Default values
+#         self.labeled_set_weight = 1.0
+# 
+#     #def __reduce__(self): !TODO: Would I need to change something here?
+# 
+#     cdef void init(self, DOUBLE_t* y, SIZE_t y_stride,
+#                    DOUBLE_t* sample_weight, double weighted_n_samples,
+#                    SIZE_t* samples, SIZE_t start, SIZE_t end) nogil:
+#         """Initialize the criterion at node samples[start:end] and
+#            children samples[start:start] and samples[start:end]."""
+#         # call parent method
+#         ClassificationCriterion.init(self)
+#         
+#         # create a mask denoting all unlabeled samples
+#          
+#         
+#     cdef void reset(self) nogil:
+#         """Reset the criterion at pos=start."""
+#         # call parent method
+#         ClassificationCriterion.reset(self)
+#         
+#         
+#         
+#         # compute the labeled sets weight for the current cut
+#         # (N_L_l * N)/(N_l * N_L), where L denotes the child and l the labeled part of the set
+#         
+#         #!TODO: place code here and delete remaining
+#         
+#         self.pos = self.start
+# 
+#         self.weighted_n_left = 0.0
+#         self.weighted_n_right = self.weighted_n_node_samples
+# 
+#         cdef SIZE_t n_outputs = self.n_outputs
+#         cdef SIZE_t* n_classes = self.n_classes
+#         cdef SIZE_t label_count_stride = self.label_count_stride
+#         cdef double* label_count_total = self.label_count_total
+#         cdef double* label_count_left = self.label_count_left
+#         cdef double* label_count_right = self.label_count_right
+# 
+#         cdef SIZE_t k = 0
+# 
+#         for k in range(n_outputs):
+#             memset(label_count_left, 0, n_classes[k] * sizeof(double))
+#             memcpy(label_count_right, label_count_total,
+#                    n_classes[k] * sizeof(double))
+# 
+#             label_count_total += label_count_stride
+#             label_count_left += label_count_stride
+#             label_count_right += label_count_stride
+# 
+#     cdef void update(self, SIZE_t new_pos) nogil:
+#         """Update the collected statistics by moving samples[pos:new_pos] from
+#             the right child to the left child."""
+#         # call parent method
+#         ClassificationCriterion.update(self, new_pos)
+#         
+#         # compute the labeled sets weight for the current cut
+#         #!TODO: place code here and delete remaining
+#         
+#         
+#         cdef DOUBLE_t* y = self.y
+#         cdef SIZE_t y_stride = self.y_stride
+#         cdef DOUBLE_t* sample_weight = self.sample_weight
+# 
+#         cdef SIZE_t* samples = self.samples
+#         cdef SIZE_t pos = self.pos
+# 
+#         cdef SIZE_t n_outputs = self.n_outputs
+#         cdef SIZE_t* n_classes = self.n_classes
+#         cdef SIZE_t label_count_stride = self.label_count_stride
+#         cdef double* label_count_total = self.label_count_total
+#         cdef double* label_count_left = self.label_count_left
+#         cdef double* label_count_right = self.label_count_right
+# 
+#         cdef SIZE_t i
+#         cdef SIZE_t p
+#         cdef SIZE_t k
+#         cdef SIZE_t label_index
+#         cdef DOUBLE_t w = 1.0
+#         cdef DOUBLE_t diff_w = 0.0
+# 
+#         # Note: We assume start <= pos < new_pos <= end
+# 
+#         for p in range(pos, new_pos):
+#             i = samples[p]
+# 
+#             if sample_weight != NULL:
+#                 w = sample_weight[i]
+# 
+#             for k in range(n_outputs):
+#                 label_index = (k * label_count_stride +
+#                                <SIZE_t> y[i * y_stride + k])
+#                 label_count_left[label_index] += w
+#                 label_count_right[label_index] -= w
+# 
+#             diff_w += w
+# 
+#         self.weighted_n_left += diff_w
+#         self.weighted_n_right -= diff_w
+# 
+#         self.pos = new_pos
 
 cdef class Entropy(ClassificationCriterion):
     """Cross Entropy impurity criteria.
