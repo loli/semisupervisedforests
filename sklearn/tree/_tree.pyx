@@ -458,16 +458,15 @@ cdef class SemiSupervisedClassificationCriterion(ClassificationCriterion):
             if sample_weight != NULL:
                 w = sample_weight[i]
 
-            c = <SIZE_t> y[i * y_stride]            
+            c = <SIZE_t> y[i * y_stride]
             if c > 0: # don't consider unlabeled samples; assuming that sample is either for all outputs unlabeled or for all labeled
-                label_count_total[k * label_count_stride + c] += w
+                label_count_total[k * label_count_stride + c - 1] += w
                 
                 for k in range(1, n_outputs):
                     c = <SIZE_t> y[i * y_stride + k]
-                    label_count_total[k * label_count_stride + c] += w
+                    label_count_total[k * label_count_stride + c - 1] += w
                 
                 weighted_n_node_samples += w
-
         self.weighted_n_node_samples = weighted_n_node_samples
 
         # Reset to pos=start
@@ -550,110 +549,95 @@ cdef class SemiSupervisedClassificationCriterion(ClassificationCriterion):
 
         self.pos = new_pos
 
-#     def __cinit__(self, SIZE_t n_outputs,
-#                   np.ndarray[SIZE_t, ndim=1] n_classes): # parent __cinit__ always called
-#         # Default values
-#         self.labeled_set_weight = 1.0
-# 
-#     #def __reduce__(self): !TODO: Would I need to change something here?
-# 
-#     cdef void init(self, DOUBLE_t* y, SIZE_t y_stride,
-#                    DOUBLE_t* sample_weight, double weighted_n_samples,
-#                    SIZE_t* samples, SIZE_t start, SIZE_t end) nogil:
-#         """Initialize the criterion at node samples[start:end] and
-#            children samples[start:start] and samples[start:end]."""
-#         # call parent method
-#         ClassificationCriterion.init(self)
-#         
-#         # create a mask denoting all unlabeled samples
-#          
-#         
-#     cdef void reset(self) nogil:
-#         """Reset the criterion at pos=start."""
-#         # call parent method
-#         ClassificationCriterion.reset(self)
-#         
-#         
-#         
-#         # compute the labeled sets weight for the current cut
-#         # (N_L_l * N)/(N_l * N_L), where L denotes the child and l the labeled part of the set
-#         
-#         #!TODO: place code here and delete remaining
-#         
-#         self.pos = self.start
-# 
-#         self.weighted_n_left = 0.0
-#         self.weighted_n_right = self.weighted_n_node_samples
-# 
-#         cdef SIZE_t n_outputs = self.n_outputs
-#         cdef SIZE_t* n_classes = self.n_classes
-#         cdef SIZE_t label_count_stride = self.label_count_stride
-#         cdef double* label_count_total = self.label_count_total
-#         cdef double* label_count_left = self.label_count_left
-#         cdef double* label_count_right = self.label_count_right
-# 
-#         cdef SIZE_t k = 0
-# 
-#         for k in range(n_outputs):
-#             memset(label_count_left, 0, n_classes[k] * sizeof(double))
-#             memcpy(label_count_right, label_count_total,
-#                    n_classes[k] * sizeof(double))
-# 
-#             label_count_total += label_count_stride
-#             label_count_left += label_count_stride
-#             label_count_right += label_count_stride
-# 
-#     cdef void update(self, SIZE_t new_pos) nogil:
-#         """Update the collected statistics by moving samples[pos:new_pos] from
-#             the right child to the left child."""
-#         # call parent method
-#         ClassificationCriterion.update(self, new_pos)
-#         
-#         # compute the labeled sets weight for the current cut
-#         #!TODO: place code here and delete remaining
-#         
-#         
-#         cdef DOUBLE_t* y = self.y
-#         cdef SIZE_t y_stride = self.y_stride
-#         cdef DOUBLE_t* sample_weight = self.sample_weight
-# 
-#         cdef SIZE_t* samples = self.samples
-#         cdef SIZE_t pos = self.pos
-# 
-#         cdef SIZE_t n_outputs = self.n_outputs
-#         cdef SIZE_t* n_classes = self.n_classes
-#         cdef SIZE_t label_count_stride = self.label_count_stride
-#         cdef double* label_count_total = self.label_count_total
-#         cdef double* label_count_left = self.label_count_left
-#         cdef double* label_count_right = self.label_count_right
-# 
-#         cdef SIZE_t i
-#         cdef SIZE_t p
-#         cdef SIZE_t k
-#         cdef SIZE_t label_index
-#         cdef DOUBLE_t w = 1.0
-#         cdef DOUBLE_t diff_w = 0.0
-# 
-#         # Note: We assume start <= pos < new_pos <= end
-# 
-#         for p in range(pos, new_pos):
-#             i = samples[p]
-# 
-#             if sample_weight != NULL:
-#                 w = sample_weight[i]
-# 
-#             for k in range(n_outputs):
-#                 label_index = (k * label_count_stride +
-#                                <SIZE_t> y[i * y_stride + k])
-#                 label_count_left[label_index] += w
-#                 label_count_right[label_index] -= w
-# 
-#             diff_w += w
-# 
-#         self.weighted_n_left += diff_w
-#         self.weighted_n_right -= diff_w
-# 
-#         self.pos = new_pos
+cdef class SemiSupervisedEntropy(SemiSupervisedClassificationCriterion):
+    """Cross Entropy impurity criteria.
+
+    Let the target be a classification outcome taking values in 0, 1, ..., K-1.
+    If node m represents a region Rm with Nm observations, then let
+
+        pmk = 1/ Nm \sum_{x_i in Rm} I(yi = k)
+
+    be the proportion of class k observations in node m.
+
+    The cross-entropy is then defined as
+
+        cross-entropy = - \sum_{k=0}^{K-1} pmk log(pmk)
+    """
+    cdef double node_impurity(self) nogil:
+        """Evaluate the impurity of the current node, i.e. the impurity of
+           samples[start:end]."""
+        cdef double weighted_n_node_samples = self.weighted_n_node_samples
+
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_total = self.label_count_total
+
+        cdef double entropy = 0.0
+        cdef double total = 0.0
+        cdef double tmp
+        cdef SIZE_t k
+        cdef SIZE_t c
+
+        for k in range(n_outputs):
+            entropy = 0.0
+
+            for c in range(n_classes[k]):
+                tmp = label_count_total[c]
+                if tmp > 0.0:
+                    tmp /= weighted_n_node_samples
+                    entropy -= tmp * log(tmp)
+
+            total += entropy
+            label_count_total += label_count_stride
+
+        return total / n_outputs
+
+    cdef void children_impurity(self, double* impurity_left,
+                                double* impurity_right) nogil:
+        """Evaluate the impurity in children nodes, i.e. the impurity of the
+           left child (samples[start:pos]) and the impurity the right child
+           (samples[pos:end])."""
+        cdef double weighted_n_node_samples = self.weighted_n_node_samples
+        cdef double weighted_n_left = self.weighted_n_left
+        cdef double weighted_n_right = self.weighted_n_right
+
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_left = self.label_count_left
+        cdef double* label_count_right = self.label_count_right
+
+        cdef double entropy_left = 0.0
+        cdef double entropy_right = 0.0
+        cdef double total_left = 0.0
+        cdef double total_right = 0.0
+        cdef double tmp
+        cdef SIZE_t k
+        cdef SIZE_t c
+
+        for k in range(n_outputs):
+            entropy_left = 0.0
+            entropy_right = 0.0
+
+            for c in range(n_classes[k]):
+                tmp = label_count_left[c]
+                if tmp > 0.0:
+                    tmp /= weighted_n_left
+                    entropy_left -= tmp * log(tmp)
+
+                tmp = label_count_right[c]
+                if tmp > 0.0:
+                    tmp /= weighted_n_right
+                    entropy_right -= tmp * log(tmp)
+
+            total_left += entropy_left
+            total_right += entropy_right
+            label_count_left += label_count_stride
+            label_count_right += label_count_stride
+
+        impurity_left[0] = total_left / n_outputs
+        impurity_right[0] = total_right / n_outputs
 
 cdef class Entropy(ClassificationCriterion):
     """Cross Entropy impurity criteria.

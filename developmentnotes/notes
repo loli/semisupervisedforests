@@ -5,6 +5,11 @@ Next to do:
 
 internal label naming:
     Internally, the labels are continuously, starting from 0. Always the lowest label is assigned the 0-index. Therefore, I could define the lowest (possibly negative) label as the "unlabeled" signal (should be mostly -1 andf otherwise only positive labels).
+    Rough hierachy:
+    - sklearn.ensemble.forest.RandomForestClassifier holds real labels
+    - sklearn.tree.tree.DecisionTreeClassifier hold 0-based labels. (sure? should not!)
+    - cython Tree class (tree_) hols o-based labels.
+    - everything else in _tree.pyx equally holds 0-based labels
 
 n_outputs:
     Second values of y.shape, seldom used.. it seems to be like a parallel optimization towards to different output label sets.
@@ -40,3 +45,25 @@ Maybe:
     Assuming that -1 (or lower negative number, but a fixed (!) one) defines the unlabeled samples, I can work internally with the 0-indexed label as unlabeled.
     Make creation of label_count_left/_right/_total skip 0-based label.
     Would have to keep track of something like n_labeled_samples_left, n_labeled_samples_right.
+    
+    I will try to use a children class of BaseDecisionTree (equal to RandomForestClassifier) to remove the y==0 label from the labels the BaseClassifier is seeing <- since he already check them and their amount and passes these to Criterion() as well as Tree() classes. Difficult, if not impossible, as BaseDecisionTree extracts n_classes_ as well as classes_ in fit() method from y directly.
+    Does Criterion() need the n_classes fully (i.e. with y==0-label?) I do not think so, as long as I restrict the usage to the semisupervised criterion.
+    
+Test code:
+from sklearn.ensemble import RandomForestClassifier
+
+#X = [[0, 1], [0, 1], [0, 1], [1, 1], [1, 1], [1, 1]]
+
+X = [[0, 0], [0, 1], [0, 1], [1, 1], [1, 1], [1, 0]]
+y = [0, -1, -1, -1, -1, 1]
+Xt = [[0,0],[0,1],[1,0],[1,1]]
+
+rdf = RandomForestClassifier(bootstrap=False, n_estimators=1, max_features=None, criterion="semisupervised")
+rdf.fit(X, y)
+t=rdf.estimators_[0].tree_
+rdf.predict(Xt) # 0, 0, 1, 1
+
+rdf2 = RandomForestClassifier(bootstrap=False, n_estimators=1, max_features=None, criterion="entropy")
+rdf2.fit(X, y)
+t2=rdf2.estimators_[0].tree_
+rdf2.predict(Xt) # 0, -1, 1, -1
