@@ -1,0 +1,55 @@
+\documentclass[a4paper,10pt]{article}
+%\documentclass[a4paper,10pt]{scrartcl}
+
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+
+\title{Schema for implementing semi-supervised forests in \textit{sklearn}}
+\author{Oskar Maier}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{\texttt{Criterion} class hierachy and method implementation}
+\noindent\texttt{Criterion} ()\\
+\indent\texttt{.impurity\_improvement}\\
+\\
+\noindent\texttt{ClassificationCriterion} (\texttt{Criterion})\\
+\indent\texttt{.\_\_cinit\_\_}\\
+\indent\texttt{.init}\\
+\indent\texttt{.reset}\\
+\indent\texttt{.update}\\
+\indent\texttt{.node\_value}\\
+\\
+\noindent\texttt{Entropy/Gini/SemiSupervisedEntropy} (\texttt{ClassificationCriterion})\\
+\indent\texttt{.node\_impurity}\\
+\indent\texttt{.children\_impurity}\\
+
+\section{Non semi-supervised calculation of criterion in \textit{sklearn}}
+\textit{sklearn} computes the impurity improvement criterion for a split in \texttt{Criterion.impurity\_improvement} using
+\begin{equation}
+  C=\frac{N_t}{N}\left(I(S_t) - \frac{N_{t_L}}{N_t} I(S_{t_L}) - \frac{N_{t_R}}{N_t} I(S_{t_R})\right)
+\end{equation}
+, where $N$ is the size of all training samples, $N_t$ the size of the training samples for the current node $t$, $N_{t_L}$ the number of samples going down the left side and $N_{t_L}$ the number going down the right side. $I(\cdot)$ is a function computing the impurity of a sample set $S$.
+
+This impurity can be e.g. the \textit{entropy}, computed with \texttt{Entropy.node\_impurity} and \texttt{Entropy.children\_impurity} respectively. Then $I(\cdot)=E(\cdot)$, which in the case of one output (the normal case), is computed as
+\begin{equation}
+  E(S) = - \sum_{k=0}^{K-1} p(S,k) log(p(S,k))
+\end{equation}
+, with $K$ denoting the total number of labels and $p(S,k)$ the probability distribution of the label $k$ in smaple set $S$. In the (unusual) case of multiple outputs, their entropies are simply averaged.
+
+\section{Base definition of semi-supervised criterion}
+In the case of sem-supervised forest training, we have labeled as well as unlabeled data, which have to be treated distinctly, as the $E(\cdot)$ can not be computed for unlabeled data. Leaving aside the factor $\frac{N_t}{N}$ and following above notation, the semi-supervised criterion is defined as
+\begin{multline}
+  C_s=\left(E(S_t,l) - \frac{N_{t_L,l}}{N_{t,l}} E(S_{t_L,l}) - \frac{N_{t_R,l}}{N_{t,l}} E(S_{t_R,l})\right)\\+ \alpha\left(D(S_t) - \frac{N_{t_L}}{N_t} D(S_{t_L}) - \frac{N_{t_R}}{N_t} D(S_{t_R})\right)
+\end{multline}
+, with the index $l$ denoting a labeled only selection from a set. The left part of the equation corresponds to the original $C$, but only applied to the labeled part of the samples. The right part provides a way to measure the impurity of a split independent of the labels and is applied to all samples (not only the unlabeled once). $\alpha$ simply serves as a balancing term between them.
+
+\section{Implementation troubles and reformulation od $C_s$}
+
+
+
+
+
+\end{document}
