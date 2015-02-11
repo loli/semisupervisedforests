@@ -50,13 +50,18 @@ Maybe:
     Does Criterion() need the n_classes fully (i.e. with y==0-label?) I do not think so, as long as I restrict the usage to the semisupervised criterion.
     
 Test code:
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, SemiSupervisedRandomForestClassifier
 
 #X = [[0, 1], [0, 1], [0, 1], [1, 1], [1, 1], [1, 1]]
 
 X = [[0, 0], [0, 1], [0, 1], [1, 1], [1, 1], [1, 0]]
 y = [0, -1, -1, -1, -1, 1]
 Xt = [[0,0],[0,1],[1,0],[1,1]]
+
+srdf = SemiSupervisedRandomForestClassifier(bootstrap=False, n_estimators=1, max_features=None, criterion="semisupervised")
+srdf.fit(X, y)
+t=srdf.estimators_[0].tree_
+srdf.predict(Xt) # 0, 0, 1, 1
 
 rdf = RandomForestClassifier(bootstrap=False, n_estimators=1, max_features=None, criterion="semisupervised")
 rdf.fit(X, y)
@@ -67,3 +72,4 @@ rdf2 = RandomForestClassifier(bootstrap=False, n_estimators=1, max_features=None
 rdf2.fit(X, y)
 t2=rdf2.estimators_[0].tree_
 rdf2.predict(Xt) # 0, -1, 1, -1
+

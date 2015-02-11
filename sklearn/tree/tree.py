@@ -38,7 +38,8 @@ from . import _tree
 __all__ = ["DecisionTreeClassifier",
            "DecisionTreeRegressor",
            "ExtraTreeClassifier",
-           "ExtraTreeRegressor"]
+           "ExtraTreeRegressor",
+           "SemiSupervisedDecisionTreeClassifier"]
 
 
 # =============================================================================
@@ -719,8 +720,8 @@ class SemiSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
             for k in range(self.n_outputs_):
                 classes_k, y[:, k] = np.unique(y[:, k], return_inverse=True)
                 # remove smallest label (assuming that always same (i.e. smallest) over all n_outputs and consistent)
-                self.classes_.append(classes_k[0:])
-                self.n_classes_.append(classes_k.shape[0]-1)
+                self.classes_.append(classes_k[1:])
+                self.n_classes_.append(classes_k.shape[0] - 1)
 
             if self.class_weight is not None:
                 expanded_class_weight = compute_sample_weight(

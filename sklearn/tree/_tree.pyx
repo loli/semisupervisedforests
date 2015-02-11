@@ -398,7 +398,7 @@ cdef class SemiSupervisedClassificationCriterion(ClassificationCriterion):
         cdef SIZE_t n_classes_k = 0
 
         for k in range(n_outputs):
-            n_classes_k = n_classes[k] - 1 # remove 0-class (unlabeled samples)
+            n_classes_k = n_classes[k]
             self.n_classes[k] = n_classes_k
 
             if n_classes_k > label_count_stride:

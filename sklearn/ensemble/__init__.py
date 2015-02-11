@@ -9,6 +9,7 @@ from .forest import RandomForestRegressor
 from .forest import RandomTreesEmbedding
 from .forest import ExtraTreesClassifier
 from .forest import ExtraTreesRegressor
+from .forest import SemiSupervisedRandomForestClassifier
 from .bagging import BaggingClassifier
 from .bagging import BaggingRegressor
 from .weight_boosting import AdaBoostClassifier
@@ -25,6 +26,7 @@ from . import partial_dependence
 __all__ = ["BaseEnsemble",
            "RandomForestClassifier", "RandomForestRegressor",
            "RandomTreesEmbedding", "ExtraTreesClassifier",
+           "SemiSupervisedRandomForestClassifier",
            "ExtraTreesRegressor", "BaggingClassifier",
            "BaggingRegressor", "GradientBoostingClassifier",
            "GradientBoostingRegressor", "AdaBoostClassifier",
