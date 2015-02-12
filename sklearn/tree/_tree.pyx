@@ -142,6 +142,7 @@ cdef class Criterion:
 
         self.children_impurity(&impurity_left, &impurity_right)
 
+        #!TODO: self.weighted_n_samples contains also unlabeled samples in the unlabeled use-case! (set in Splitter)
         return ((self.weighted_n_node_samples / self.weighted_n_samples) *
                 (impurity - self.weighted_n_right / self.weighted_n_node_samples * impurity_right
                           - self.weighted_n_left / self.weighted_n_node_samples * impurity_left))
@@ -364,281 +365,6 @@ cdef class ClassificationCriterion(Criterion):
             dest += label_count_stride
             label_count_total += label_count_stride
 
-cdef class SemiSupervisedClassificationCriterion(ClassificationCriterion):
-    """Abstract semi-supervised criterion for classification."""
-
-    def __cinit__(self, SIZE_t n_outputs,
-                  np.ndarray[SIZE_t, ndim=1] n_classes):
-        # Default values
-        self.y = NULL
-        self.y_stride = 0
-        self.sample_weight = NULL
-
-        self.samples = NULL
-        self.start = 0
-        self.pos = 0
-        self.end = 0
-
-        self.n_outputs = n_outputs
-        self.n_node_samples = 0
-        self.weighted_n_node_samples = 0.0
-        self.weighted_n_left = 0.0
-        self.weighted_n_right = 0.0
-
-        self.label_count_left = NULL
-        self.label_count_right = NULL
-        self.label_count_total = NULL
-
-        # Count labels for each output
-        self.n_classes = NULL
-        safe_realloc(&self.n_classes, n_outputs)
-
-        cdef SIZE_t k = 0
-        cdef SIZE_t label_count_stride = 0
-        cdef SIZE_t n_classes_k = 0
-
-        for k in range(n_outputs):
-            n_classes_k = n_classes[k]
-            self.n_classes[k] = n_classes_k
-
-            if n_classes_k > label_count_stride:
-                label_count_stride = n_classes_k
-
-        self.label_count_stride = label_count_stride
-
-        # Allocate counters
-        cdef SIZE_t n_elements = n_outputs * label_count_stride
-        self.label_count_left = <double*> calloc(n_elements, sizeof(double))
-        self.label_count_right = <double*> calloc(n_elements, sizeof(double))
-        self.label_count_total = <double*> calloc(n_elements, sizeof(double))
-
-        # Check for allocation errors
-        if (self.label_count_left == NULL or
-                self.label_count_right == NULL or
-                self.label_count_total == NULL):
-            raise MemoryError()
-
-    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride,
-                   DOUBLE_t* sample_weight, double weighted_n_samples,
-                   SIZE_t* samples, SIZE_t start, SIZE_t end) nogil:
-        """Initialize the criterion at node samples[start:end] and
-           children samples[start:start] and samples[start:end]."""
-        # Initialize fields
-        self.y = y
-        self.y_stride = y_stride
-        self.sample_weight = sample_weight
-        self.samples = samples
-        self.start = start
-        self.end = end
-        self.n_node_samples = end - start
-        self.weighted_n_samples = weighted_n_samples
-        cdef double weighted_n_node_samples = 0.0
-
-        # Initialize label_count_total and weighted_n_node_samples
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t label_count_stride = self.label_count_stride
-        cdef double* label_count_total = self.label_count_total
-
-        cdef SIZE_t i = 0
-        cdef SIZE_t p = 0
-        cdef SIZE_t k = 0
-        cdef SIZE_t c = 0
-        cdef DOUBLE_t w = 1.0
-        cdef SIZE_t offset = 0
-
-        for k in range(n_outputs):
-            memset(label_count_total + offset, 0,
-                   n_classes[k] * sizeof(double))
-            offset += label_count_stride
-
-        for p in range(start, end):
-            i = samples[p]
-
-            if sample_weight != NULL:
-                w = sample_weight[i]
-
-            c = <SIZE_t> y[i * y_stride]
-            if c > 0: # don't consider unlabeled samples; assuming that sample is either for all outputs unlabeled or for all labeled
-                label_count_total[k * label_count_stride + c - 1] += w
-                
-                for k in range(1, n_outputs):
-                    c = <SIZE_t> y[i * y_stride + k]
-                    label_count_total[k * label_count_stride + c - 1] += w
-                
-                weighted_n_node_samples += w
-        self.weighted_n_node_samples = weighted_n_node_samples
-
-        # Reset to pos=start
-        self.reset()
-
-    cdef void reset(self) nogil:
-        """Reset the criterion at pos=start."""
-        self.pos = self.start
-
-        self.weighted_n_left = 0.0
-        self.weighted_n_right = self.weighted_n_node_samples
-
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t label_count_stride = self.label_count_stride
-        cdef double* label_count_total = self.label_count_total
-        cdef double* label_count_left = self.label_count_left
-        cdef double* label_count_right = self.label_count_right
-
-        cdef SIZE_t k = 0
-
-        for k in range(n_outputs):
-            memset(label_count_left, 0, n_classes[k] * sizeof(double))
-            memcpy(label_count_right, label_count_total,
-                   n_classes[k] * sizeof(double))
-
-            label_count_total += label_count_stride
-            label_count_left += label_count_stride
-            label_count_right += label_count_stride
-
-    cdef void update(self, SIZE_t new_pos) nogil:
-        """Update the collected statistics by moving samples[pos:new_pos] from
-            the right child to the left child."""
-        cdef DOUBLE_t* y = self.y
-        cdef SIZE_t y_stride = self.y_stride
-        cdef DOUBLE_t* sample_weight = self.sample_weight
-
-        cdef SIZE_t* samples = self.samples
-        cdef SIZE_t pos = self.pos
-
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t label_count_stride = self.label_count_stride
-        cdef double* label_count_total = self.label_count_total
-        cdef double* label_count_left = self.label_count_left
-        cdef double* label_count_right = self.label_count_right
-
-        cdef SIZE_t i = 0
-        cdef SIZE_t p = 0
-        cdef SIZE_t c = 0
-        cdef SIZE_t k = 0
-        cdef SIZE_t label_index
-        cdef DOUBLE_t w = 1.0
-        cdef DOUBLE_t diff_w = 0.0
-
-        # Note: We assume start <= pos < new_pos <= end
-
-        for p in range(pos, new_pos):
-            i = samples[p]
-
-            if sample_weight != NULL:
-                w = sample_weight[i]
-
-            c = <SIZE_t> y[i * y_stride]
-            if c > 0: # don't consider unlabeled samples; assuming that sample is either for all outputs unlabeled or for all labeled
-                label_index = k * label_count_stride + c
-                label_count_left[label_index] += w
-                label_count_right[label_index] -= w
-                
-                for k in range(1, n_outputs):
-                    label_index = (k * label_count_stride +
-                                   <SIZE_t> y[i * y_stride + k])
-                    label_count_left[label_index] += w
-                    label_count_right[label_index] -= w
-    
-                diff_w += w
-
-        self.weighted_n_left += diff_w
-        self.weighted_n_right -= diff_w
-
-        self.pos = new_pos
-
-cdef class SemiSupervisedEntropy(SemiSupervisedClassificationCriterion):
-    """Cross Entropy impurity criteria.
-
-    Let the target be a classification outcome taking values in 0, 1, ..., K-1.
-    If node m represents a region Rm with Nm observations, then let
-
-        pmk = 1/ Nm \sum_{x_i in Rm} I(yi = k)
-
-    be the proportion of class k observations in node m.
-
-    The cross-entropy is then defined as
-
-        cross-entropy = - \sum_{k=0}^{K-1} pmk log(pmk)
-    """
-    cdef double node_impurity(self) nogil:
-        """Evaluate the impurity of the current node, i.e. the impurity of
-           samples[start:end]."""
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
-
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t label_count_stride = self.label_count_stride
-        cdef double* label_count_total = self.label_count_total
-
-        cdef double entropy = 0.0
-        cdef double total = 0.0
-        cdef double tmp
-        cdef SIZE_t k
-        cdef SIZE_t c
-
-        for k in range(n_outputs):
-            entropy = 0.0
-
-            for c in range(n_classes[k]):
-                tmp = label_count_total[c]
-                if tmp > 0.0:
-                    tmp /= weighted_n_node_samples
-                    entropy -= tmp * log(tmp)
-
-            total += entropy
-            label_count_total += label_count_stride
-
-        return total / n_outputs
-
-    cdef void children_impurity(self, double* impurity_left,
-                                double* impurity_right) nogil:
-        """Evaluate the impurity in children nodes, i.e. the impurity of the
-           left child (samples[start:pos]) and the impurity the right child
-           (samples[pos:end])."""
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
-        cdef double weighted_n_left = self.weighted_n_left
-        cdef double weighted_n_right = self.weighted_n_right
-
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t label_count_stride = self.label_count_stride
-        cdef double* label_count_left = self.label_count_left
-        cdef double* label_count_right = self.label_count_right
-
-        cdef double entropy_left = 0.0
-        cdef double entropy_right = 0.0
-        cdef double total_left = 0.0
-        cdef double total_right = 0.0
-        cdef double tmp
-        cdef SIZE_t k
-        cdef SIZE_t c
-
-        for k in range(n_outputs):
-            entropy_left = 0.0
-            entropy_right = 0.0
-
-            for c in range(n_classes[k]):
-                tmp = label_count_left[c]
-                if tmp > 0.0:
-                    tmp /= weighted_n_left
-                    entropy_left -= tmp * log(tmp)
-
-                tmp = label_count_right[c]
-                if tmp > 0.0:
-                    tmp /= weighted_n_right
-                    entropy_right -= tmp * log(tmp)
-
-            total_left += entropy_left
-            total_right += entropy_right
-            label_count_left += label_count_stride
-            label_count_right += label_count_stride
-
-        impurity_left[0] = total_left / n_outputs
-        impurity_right[0] = total_right / n_outputs
-
 cdef class Entropy(ClassificationCriterion):
     """Cross Entropy impurity criteria.
 
@@ -729,6 +455,213 @@ cdef class Entropy(ClassificationCriterion):
         impurity_left[0] = total_left / n_outputs
         impurity_right[0] = total_right / n_outputs
 
+cdef class LabeledOnlyEntropy(Entropy):
+    """Cross Entropy impurity criteria applied to labeled samples only."""
+
+    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride,
+                   DOUBLE_t* sample_weight, double weighted_n_samples,
+                   SIZE_t* samples, SIZE_t start, SIZE_t end) nogil:
+        """Initialize the criterion at node samples[start:end] and
+           children samples[start:start] and samples[start:end]."""
+        # Initialize fields
+        self.y = y
+        self.y_stride = y_stride
+        self.sample_weight = sample_weight
+        self.samples = samples
+        self.start = start
+        self.end = end
+        self.n_node_samples = end - start
+        self.weighted_n_samples = weighted_n_samples
+        cdef double weighted_n_node_samples = 0.0
+
+        # Initialize label_count_total and weighted_n_node_samples
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_total = self.label_count_total
+
+        cdef SIZE_t i = 0
+        cdef SIZE_t p = 0
+        cdef SIZE_t k = 0
+        cdef SIZE_t c = 0
+        cdef DOUBLE_t w = 1.0
+        cdef SIZE_t offset = 0
+
+        for k in range(n_outputs):
+            memset(label_count_total + offset, 0,
+                   n_classes[k] * sizeof(double))
+            offset += label_count_stride
+
+        for p in range(start, end):
+            i = samples[p]
+
+            if sample_weight != NULL:
+                w = sample_weight[i]
+
+            c = <SIZE_t> y[i * y_stride]
+            if c > 0: # don't consider unlabeled samples; assuming that sample is either for all outputs unlabeled or for all labeled
+                label_count_total[k * label_count_stride + c - 1] += w
+                
+                for k in range(1, n_outputs):
+                    c = <SIZE_t> y[i * y_stride + k]
+                    label_count_total[k * label_count_stride + c - 1] += w
+                
+                weighted_n_node_samples += w
+        self.weighted_n_node_samples = weighted_n_node_samples
+
+        # Reset to pos=start
+        self.reset()
+
+    cdef void update(self, SIZE_t new_pos) nogil:
+        """Update the collected statistics by moving samples[pos:new_pos] from
+            the right child to the left child."""
+        cdef DOUBLE_t* y = self.y
+        cdef SIZE_t y_stride = self.y_stride
+        cdef DOUBLE_t* sample_weight = self.sample_weight
+
+        cdef SIZE_t* samples = self.samples
+        cdef SIZE_t pos = self.pos
+
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_total = self.label_count_total
+        cdef double* label_count_left = self.label_count_left
+        cdef double* label_count_right = self.label_count_right
+
+        cdef SIZE_t i = 0
+        cdef SIZE_t p = 0
+        cdef SIZE_t c = 0
+        cdef SIZE_t k = 0
+        cdef SIZE_t label_index
+        cdef DOUBLE_t w = 1.0
+        cdef DOUBLE_t diff_w = 0.0
+
+        # Note: We assume start <= pos < new_pos <= end
+
+        for p in range(pos, new_pos):
+            i = samples[p]
+
+            if sample_weight != NULL:
+                w = sample_weight[i]
+
+            c = <SIZE_t> y[i * y_stride]
+            if c > 0: # don't consider unlabeled samples; assuming that sample is either for all outputs unlabeled or for all labeled
+                label_index = k * label_count_stride + c
+                label_count_left[label_index] += w
+                label_count_right[label_index] -= w
+                
+                for k in range(1, n_outputs):
+                    label_index = (k * label_count_stride +
+                                   <SIZE_t> y[i * y_stride + k])
+                    label_count_left[label_index] += w
+                    label_count_right[label_index] -= w
+    
+                diff_w += w
+
+        self.weighted_n_left += diff_w
+        self.weighted_n_right -= diff_w
+
+        self.pos = new_pos
+        
+cdef class Variance(ClassificationCriterion):
+    """Sample-set variance impurity criteria."""
+    
+    @cython.boundscheck(False) # turn of ndarray bounds-checking for entire function
+    cpdef double node_impurity(self) with gil: # !TODO: Which definition type is required here?
+        """Evaluate the variance of the current node, i.e. the variance of
+           samples[start:end]."""
+           
+        # requires x_stride and X
+        cdef SIZE_T x_stride = self.x_stride
+        cdef SIZE_T start = self.start
+        cdef SIZE_T end = self.end
+        
+        cdef np.ndarray[DTYPE_t, ndim=2] S = NULL
+        cdef SIZE_T p = 0
+        
+        safe_realloc(&S, (end - start) * x_stride) #!TODO: should rather be done once at the beginning, to full X size (since might be faster that way # allocate double * n_features * (end - start)
+
+        # collect current set as indentified by sample indices in samples between start and end
+        for p in range(start, end):
+            memcpy(S.data + (p - start) * x_stride, X + x_stride * samples[p], x_stride)
+            #S.data[(p - start) * x_stride] = X[x_stride * samples[p]] # memcopy(n_features length)
+            
+        variance = np.log(np.linalg.det(np.cov(S)))
+        
+           
+        cdef double weighted_n_node_samples = self.weighted_n_node_samples
+
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_total = self.label_count_total
+
+        cdef double entropy = 0.0
+        cdef double total = 0.0
+        cdef double tmp
+        cdef SIZE_t k
+        cdef SIZE_t c
+
+        for k in range(n_outputs):
+            entropy = 0.0
+
+            for c in range(n_classes[k]):
+                tmp = label_count_total[c]
+                if tmp > 0.0:
+                    tmp /= weighted_n_node_samples
+                    entropy -= tmp * log(tmp)
+
+            total += entropy
+            label_count_total += label_count_stride
+
+        return total / n_outputs
+
+    cdef void children_impurity(self, double* impurity_left,
+                                double* impurity_right) nogil:
+        """Evaluate the impurity in children nodes, i.e. the impurity of the
+           left child (samples[start:pos]) and the impurity the right child
+           (samples[pos:end])."""
+        cdef double weighted_n_node_samples = self.weighted_n_node_samples
+        cdef double weighted_n_left = self.weighted_n_left
+        cdef double weighted_n_right = self.weighted_n_right
+
+        cdef SIZE_t n_outputs = self.n_outputs
+        cdef SIZE_t* n_classes = self.n_classes
+        cdef SIZE_t label_count_stride = self.label_count_stride
+        cdef double* label_count_left = self.label_count_left
+        cdef double* label_count_right = self.label_count_right
+
+        cdef double entropy_left = 0.0
+        cdef double entropy_right = 0.0
+        cdef double total_left = 0.0
+        cdef double total_right = 0.0
+        cdef double tmp
+        cdef SIZE_t k
+        cdef SIZE_t c
+
+        for k in range(n_outputs):
+            entropy_left = 0.0
+            entropy_right = 0.0
+
+            for c in range(n_classes[k]):
+                tmp = label_count_left[c]
+                if tmp > 0.0:
+                    tmp /= weighted_n_left
+                    entropy_left -= tmp * log(tmp)
+
+                tmp = label_count_right[c]
+                if tmp > 0.0:
+                    tmp /= weighted_n_right
+                    entropy_right -= tmp * log(tmp)
+
+            total_left += entropy_left
+            total_right += entropy_right
+            label_count_left += label_count_stride
+            label_count_right += label_count_stride
+
+        impurity_left[0] = total_left / n_outputs
+        impurity_right[0] = total_right / n_outputs        
 
 cdef class Gini(ClassificationCriterion):
     """Gini Index impurity criteria.
@@ -1436,6 +1369,191 @@ cdef class BestSplitter(BaseDenseSplitter):
                               X_fx_stride * current.feature]
 
                 sort(Xf + start, samples + start, end - start)
+
+                if Xf[end - 1] <= Xf[start] + FEATURE_THRESHOLD:
+                    features[f_j] = features[n_total_constants]
+                    features[n_total_constants] = current.feature
+
+                    n_found_constants += 1
+                    n_total_constants += 1
+
+                else:
+                    f_i -= 1
+                    features[f_i], features[f_j] = features[f_j], features[f_i]
+
+                    # Evaluate all splits
+                    self.criterion.reset()
+                    p = start
+
+                    while p < end:
+                        while (p + 1 < end and
+                               Xf[p + 1] <= Xf[p] + FEATURE_THRESHOLD):
+                            p += 1
+
+                        # (p + 1 >= end) or (X[samples[p + 1], current.feature] >
+                        #                    X[samples[p], current.feature])
+                        p += 1
+                        # (p >= end) or (X[samples[p], current.feature] >
+                        #                X[samples[p - 1], current.feature])
+
+                        if p < end:
+                            current.pos = p
+
+                            # Reject if min_samples_leaf is not guaranteed
+                            if (((current.pos - start) < min_samples_leaf) or
+                                    ((end - current.pos) < min_samples_leaf)):
+                                continue
+
+                            self.criterion.update(current.pos)
+
+                            # Reject if min_weight_leaf is not satisfied
+                            if ((self.criterion.weighted_n_left < min_weight_leaf) or
+                                    (self.criterion.weighted_n_right < min_weight_leaf)):
+                                continue
+
+                            current.improvement = self.criterion.impurity_improvement(impurity)
+
+                            if current.improvement > best.improvement:
+                                self.criterion.children_impurity(&current.impurity_left,
+                                                                 &current.impurity_right)
+                                current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
+
+                                if current.threshold == Xf[p]:
+                                    current.threshold = Xf[p - 1]
+
+                                best = current  # copy
+
+        # Reorganize into samples[start:best.pos] + samples[best.pos:end]
+        if best.pos < end:
+            partition_end = end
+            p = start
+
+            while p < partition_end:
+                if X[X_sample_stride * samples[p] +
+                     X_fx_stride * best.feature] <= best.threshold:
+                    p += 1
+
+                else:
+                    partition_end -= 1
+
+                    tmp = samples[partition_end]
+                    samples[partition_end] = samples[p]
+                    samples[p] = tmp
+
+        # Respect invariant for constant features: the original order of
+        # element in features[:n_known_constants] must be preserved for sibling
+        # and child nodes
+        memcpy(features, constant_features, sizeof(SIZE_t) * n_known_constants)
+
+        # Copy newly found constant features
+        memcpy(constant_features + n_known_constants,
+               features + n_known_constants,
+               sizeof(SIZE_t) * n_found_constants)
+
+        # Return values
+        split[0] = best
+        n_constant_features[0] = n_total_constants
+
+cdef class SemiSupervisedBestSplitter(BaseDenseSplitter):
+    """Splitter for finding the best split."""
+
+    cdef void node_split(self, double impurity, SplitRecord* split,
+                         SIZE_t* n_constant_features) nogil:
+        """Find the best split on node samples[start:end]."""
+        # Find the best split
+        cdef SIZE_t* samples = self.samples
+        cdef SIZE_t start = self.start
+        cdef SIZE_t end = self.end
+
+        cdef SIZE_t* features = self.features
+        cdef SIZE_t* constant_features = self.constant_features
+        cdef SIZE_t n_features = self.n_features
+
+        cdef DTYPE_t* X = self.X
+        cdef DTYPE_t* Xf = self.feature_values
+        cdef SIZE_t X_sample_stride = self.X_sample_stride
+        cdef SIZE_t X_fx_stride = self.X_fx_stride
+        cdef SIZE_t max_features = self.max_features
+        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
+        cdef double min_weight_leaf = self.min_weight_leaf
+        cdef UINT32_t* random_state = &self.rand_r_state
+
+        cdef SplitRecord best, current
+
+        cdef SIZE_t f_i = n_features
+        cdef SIZE_t f_j, p, tmp
+        cdef SIZE_t n_visited_features = 0
+        # Number of features discovered to be constant during the split search
+        cdef SIZE_t n_found_constants = 0
+        # Number of features known to be constant and drawn without replacement
+        cdef SIZE_t n_drawn_constants = 0
+        cdef SIZE_t n_known_constants = n_constant_features[0]
+        # n_total_constants = n_known_constants + n_found_constants
+        cdef SIZE_t n_total_constants = n_known_constants
+        cdef DTYPE_t current_feature_value
+        cdef SIZE_t partition_end
+
+        _init_split(&best, end)
+
+        # Sample up to max_features without replacement using a
+        # Fisher-Yates-based algorithm (using the local variables `f_i` and
+        # `f_j` to compute a permutation of the `features` array).
+        #
+        # Skip the CPU intensive evaluation of the impurity criterion for
+        # features that were already detected as constant (hence not suitable
+        # for good splitting) by ancestor nodes and save the information on
+        # newly discovered constant features to spare computation on descendant
+        # nodes.
+        while (f_i > n_total_constants and  # Stop early if remaining features
+                                            # are constant
+                (n_visited_features < max_features or
+                 # At least one drawn features must be non constant
+                 n_visited_features <= n_found_constants + n_drawn_constants)):
+
+            n_visited_features += 1
+
+            # Loop invariant: elements of features in
+            # - [:n_drawn_constant[ holds drawn and known constant features;
+            # - [n_drawn_constant:n_known_constant[ holds known constant
+            #   features that haven't been drawn yet;
+            # - [n_known_constant:n_total_constant[ holds newly found constant
+            #   features;
+            # - [n_total_constant:f_i[ holds features that haven't been drawn
+            #   yet and aren't constant apriori.
+            # - [f_i:n_features[ holds features that have been drawn
+            #   and aren't constant.
+
+            # Draw a feature at random
+            f_j = rand_int(n_drawn_constants, f_i - n_found_constants,
+                           random_state)
+
+            if f_j < n_known_constants:
+                # f_j in the interval [n_drawn_constants, n_known_constants[
+                tmp = features[f_j]
+                features[f_j] = features[n_drawn_constants]
+                features[n_drawn_constants] = tmp
+
+                n_drawn_constants += 1
+
+            else:
+                # f_j in the interval [n_known_constants, f_i - n_found_constants[
+                f_j += n_found_constants
+                # f_j in the interval [n_total_constants, f_i[
+
+                current.feature = features[f_j]
+
+                # Sort samples along that feature; first copy the feature
+                # values for the active samples into Xf, s.t.
+                # Xf[i] == X[samples[i], j], so the sort uses the cache more
+                # effectively.
+                for p in range(start, end):
+                    Xf[p] = X[X_sample_stride * samples[p] +
+                              X_fx_stride * current.feature]
+
+                sort(Xf + start, samples + start, end - start)
+                
+                # sort also in X itself, required for computation of change in variance (unlabeled criterion)
+                sort(X + start, samples + start, end - start)
 
                 if Xf[end - 1] <= Xf[start] + FEATURE_THRESHOLD:
                     features[f_j] = features[n_total_constants]

@@ -49,7 +49,7 @@ __all__ = ["DecisionTreeClassifier",
 DTYPE = _tree.DTYPE
 DOUBLE = _tree.DOUBLE
 
-CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy, "semisupervised": _tree.SemiSupervisedEntropy}
+CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy, "semisupervised": _tree.LabeledOnlyEntropy}
 CRITERIA_REG = {"mse": _tree.MSE, "friedman_mse": _tree.FriedmanMSE}
 
 DENSE_SPLITTERS = {"best": _tree.BestSplitter,
