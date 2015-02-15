@@ -365,6 +365,157 @@ cdef class ClassificationCriterion(Criterion):
             dest += label_count_stride
             label_count_total += label_count_stride
 
+
+cdef class UnsupervisedCriterion(Criterion):
+    """Criterion for un-supervised classification using differential entropy."""
+    
+    # note: sample weights can not be incorporated, assuming equal weight!
+    # but: it could be introduced using weighted sample sums in the impurity_improvement method
+    
+    # create a copy X' of X
+    # always work on memory of X' defined by start - end
+    # upon init, place observatins/samples from X into X' according to sample-indices in `samples`, they will be ordered
+    # for a split, simply define X_left as the X' from start to pos and X_right as the X' from pos to end
+    # for the impurity calculation, compute log(det(\Sigma))...etc on X_left and X_right
+    # advanced: try update log(det(\Sigma)) dynamically by moving samples from X_right to X_left
+
+    def __cinit__(self, SIZE_t n_samples, SIZE_t n_features):
+        # Default values
+        self.X = NULL # all training samples
+        self.X_stride = 0 # stride (i.e. feature length * feature_dtype_length)
+        self.S = NULL # current node's set of samples, ordered to contain S_left and S_right between start, pos and end
+
+        self.samples = NULL # sample ids, ordered by splitter between start and end
+        self.start = 0
+        self.pos = 0
+        self.end = 0
+
+        self.n_samples = n_samples # size of X
+        self.n_node_samples = 0 # size of S
+        self.n_node_samples_left = 0 # size of S_left
+        self.n_node_samples_right = 0 # size of S_right
+        
+        # Allocate memory
+        self.S = <double*> malloc(n_samples * n_features * sizeof(DTYPE_t)) # same size as X
+
+        # Check for allocation errors
+        if self.S == NULL:
+            raise MemoryError()
+
+    def __dealloc__(self):
+        """Destructor."""
+        free(self.S)
+        
+    def __reduce__(self): #!TODO: Not sure how to adapt this!
+        return (UnsupervisedCriterion,
+                (self.n_outputs,
+                 sizet_ptr_to_ndarray(self.n_classes, self.n_outputs)),
+                self.__getstate__())
+
+    def __getstate__(self):
+        return {}
+
+    def __setstate__(self, d):
+        pass
+
+    cdef void init(self, DOUBLE_t* X, SIZE_t X_stride,
+                   SIZE_t* samples, SIZE_t start, SIZE_t end) nogil:
+        """Initialize the criterion at node samples[start:end] and
+           children samples[start:start] and samples[start:end]."""
+        # Initialize fields
+        self.X = X
+        self.X_stride = X_stride
+        self.samples = samples
+        self.start = start
+        self.end = end
+        self.n_node_samples = end - start
+
+        # Take samples from X and order into S between start and end according to sample indices list `samples`
+        cdef SIZE_t n_node_samples = self.n_node_samples
+        
+        cdef SIZE_t i = 0
+        
+        for i in range(n_node_samples):
+            memcpy(S + (start + i) * X_stride, X + samples[i] * X_stride, X_stride)
+        
+        # Reset to pos=start
+        self.reset()
+
+    cdef void reset(self) nogil:
+        """Reset the criterion at pos=start."""
+        self.pos = self.start
+        
+        self.n_node_samples_left = 0
+        self.n_node_samples_right = self.n_node_samples
+
+    cdef void update(self, SIZE_t new_pos) nogil:
+        """Update the collected statistics by moving samples[pos:new_pos] from
+            the right child to the left child."""
+        self.n_node_samples_left = new_pos - start
+        self.n_node_samples_right = end - new_pos
+        self.pos = new_pos
+
+    cdef double node_impurity(self) nogil:
+        # here, the real formula has to got
+        cdef SIZE_t start = self.start
+        cdef X_stride = self.X_stride
+        cdef n_node_samples = self.n_node_samples
+        cdef double entropy = 0.0
+        
+        entropy = self.differential_entropy(S + start * X_stride, n_node_samples) # src, n_samples (computes log-det of cov only!)
+        
+        return entropy
+
+    cdef void children_impurity(self, double* impurity_left,
+                                double* impurity_right) nogil:
+        cdef SIZE_t start = self.start
+        cdef SIZE_t pos = self.pos
+        cdef X_stride = self.X_stride
+        cdef n_node_samples_left = self.n_node_samples_left
+        cdef n_node_samples_right = self.n_node_samples_right
+        
+        impurity_left[0] = self.differential_entropy(S + start * X_stride, n_node_samples_left)
+        impurity_right[0] = self.differential_entropy(S + pos * X_stride, n_node_samples_right)
+
+    cdef void node_value(self, double* dest) nogil:
+        """Compute the node value of samples[start:end] into dest."""
+        #!TODO: This can not do anything, as not labels existent.
+        pass
+    
+    cdef double impurity_improvement(self, double impurity) nogil:
+        """Weighted impurity improvement, i.e.
+
+           N_t / N * (impurity - N_t_L / N_t * left impurity
+                               - N_t_L / N_t * right impurity),
+
+           where N is the total number of samples, N_t is the number of samples
+           in the current node, N_t_L is the number of samples in the left
+           child and N_t_R is the number of samples in the right child."""
+        cdef double impurity_left
+        cdef double impurity_right
+
+        self.children_impurity(&impurity_left, &impurity_right)
+
+        #!TODO: Maybe re-introduce sample weights here
+        return ((self.n_node_samples / self.n_samples) *
+                (impurity - self.n_node_samples_right / self.n_node_samples * impurity_right
+                          - self.n_node_samples_left / self.n_node_samples * impurity_left))
+    
+    cpdef double differential_entropy(DOUBLE_t* src, SIZE_t size):
+        """Compute the differential entropy i.e. the log(det(cov(S))) of a set
+        S of observations defined by src and size."""
+        cdef X_stride = self.X_stride
+        
+        # convert memory block to numpy array
+        cdef np.npy_intp shape[2]
+        shape[0] = <np.npy_intp> size
+        shape[1] = <np.npy_intp> X_stride / sizeof(DOUBLE_t)
+        cdef np.ndarray arr
+        arr = np.PyArray_SimpleNewFromData(2, shape, np.NPY_DOUBLE, src)
+        
+        # compute the differential entropy using numpy
+        return numpy.log(numpy.linalg.det(numpy.linalg.cov(arr)))
+
 cdef class Entropy(ClassificationCriterion):
     """Cross Entropy impurity criteria.
 
