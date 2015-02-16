@@ -59,6 +59,20 @@ cdef class Criterion:
     cdef void node_value(self, double* dest) nogil
     cdef double impurity_improvement(self, double impurity) nogil
 
+cdef class UnsupervisedClassificationCriterion(Criterion):
+    # Internal structures
+    cdef DOUBLE_t* X
+    cdef SIZE_t X_stride
+    cdef DOUBLE_t* S
+    cdef SIZE_t n_samples
+    cdef SIZE_t n_features
+    cdef SIZE_t n_node_samples_left
+    cdef SIZE_t n_node_samples_right
+    
+    # Methods
+    cdef void init2(self, DOUBLE_t* X, SIZE_t X_stride,
+                    SIZE_t* samples, SIZE_t start, SIZE_t end) nogil
+    cdef double differential_entropy(self, DOUBLE_t* src, SIZE_t size)
 
 # =============================================================================
 # Splitter
@@ -136,7 +150,6 @@ cdef class Splitter:
     cdef void node_value(self, double* dest) nogil
 
     cdef double node_impurity(self) nogil
-
 
 # =============================================================================
 # Tree

@@ -39,7 +39,8 @@ __all__ = ["DecisionTreeClassifier",
            "DecisionTreeRegressor",
            "ExtraTreeClassifier",
            "ExtraTreeRegressor",
-           "SemiSupervisedDecisionTreeClassifier"]
+           "SemiSupervisedDecisionTreeClassifier",
+           "UnSupervisedDecisionTreeClassifier"]
 
 
 # =============================================================================
@@ -50,11 +51,13 @@ DTYPE = _tree.DTYPE
 DOUBLE = _tree.DOUBLE
 
 CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy, "semisupervised": _tree.LabeledOnlyEntropy}
+
 CRITERIA_REG = {"mse": _tree.MSE, "friedman_mse": _tree.FriedmanMSE}
 
 DENSE_SPLITTERS = {"best": _tree.BestSplitter,
                    "presort-best": _tree.PresortBestSplitter,
-                   "random": _tree.RandomSplitter}
+                   "random": _tree.RandomSplitter,
+                   "unsupervised": _tree.UnSupervisedBestSplitter}
 
 SPARSE_SPLITTERS = {"best": _tree.BestSparseSplitter,
                     "random": _tree.RandomSparseSplitter}
@@ -628,6 +631,36 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
 
             return proba
 
+class UnSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
+    def __init__(self,
+                 criterion="unsupervised",
+                 splitter="unsupervised",
+                 max_depth=None,
+                 min_samples_split=2,
+                 min_samples_leaf=1,
+                 min_weight_fraction_leaf=0.,
+                 max_features=None,
+                 random_state=None,
+                 max_leaf_nodes=None,
+                 class_weight=None):
+        super(UnSupervisedDecisionTreeClassifier, self).__init__(
+            criterion=criterion,
+            splitter=splitter,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            min_weight_fraction_leaf=min_weight_fraction_leaf,
+            max_features=max_features,
+            max_leaf_nodes=max_leaf_nodes,
+            class_weight=class_weight,
+            random_state=random_state)
+    
+    def fit(self, X, y, sample_weight=None, check_input=True):
+        # initialise criterion here, since it requires another syntax than the default ones
+        if 'unsupervised' == self.criterion:
+            self.criterion =  _tree.UnsupervisedClassificationCriterion(X.shape[0], X.shape[1])
+        DecisionTreeClassifier.fit(self, X, y, sample_weight, check_input)
+
 
 class SemiSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
     def __init__(self,
@@ -641,7 +674,7 @@ class SemiSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
                  random_state=None,
                  max_leaf_nodes=None,
                  class_weight=None):
-        super(DecisionTreeClassifier, self).__init__(
+        super(SemiSupervisedDecisionTreeClassifier, self).__init__(
             criterion=criterion,
             splitter=splitter,
             max_depth=max_depth,
@@ -651,7 +684,7 @@ class SemiSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
             max_features=max_features,
             max_leaf_nodes=max_leaf_nodes,
             class_weight=class_weight,
-            random_state=random_state)    
+            random_state=random_state)
 
     def fit(self, X, y, sample_weight=None, check_input=True):
         """Build a decision tree from the training set (X, y).
