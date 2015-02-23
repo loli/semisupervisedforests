@@ -61,18 +61,19 @@ cdef class Criterion:
 
 cdef class UnsupervisedClassificationCriterion(Criterion):
     # Internal structures
-    cdef DOUBLE_t* X
+    cdef DTYPE_t* X
     cdef SIZE_t X_stride
-    cdef DOUBLE_t* S
+    cdef DTYPE_t* S
     cdef SIZE_t n_samples
     cdef SIZE_t n_features
     cdef SIZE_t n_node_samples_left
     cdef SIZE_t n_node_samples_right
-    
+     
     # Methods
-    cdef void init2(self, DOUBLE_t* X, SIZE_t X_stride,
+    cdef void init2(self, DTYPE_t* X, SIZE_t X_stride,
                     SIZE_t* samples, SIZE_t start, SIZE_t end) nogil
-    cdef double differential_entropy(self, DOUBLE_t* src, SIZE_t size)
+    cdef double differential_entropy(self, DTYPE_t* src, SIZE_t size)
+    cdef print_all(self)
 
 # =============================================================================
 # Splitter
@@ -137,7 +138,7 @@ cdef class Splitter:
     # This allows optimization with depth-based tree building.
 
     # Methods
-    cdef void init(self, object X, np.ndarray y, DOUBLE_t* sample_weight)
+    cdef void init(self, object X, np.ndarray y, DOUBLE_t* sample_weight)  except *
 
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          double* weighted_n_node_samples) nogil
