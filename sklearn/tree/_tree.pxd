@@ -66,11 +66,13 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
     cdef DTYPE_t* S
     cdef SIZE_t n_samples
     cdef SIZE_t n_features
+    # !TODO: I'll then also have to remove the n_node_samples_left and n_node_samples_right, as they'll be unused; same goes for n_samples, I think
     cdef SIZE_t n_node_samples_left
     cdef SIZE_t n_node_samples_right
      
     # Methods
     cdef void init2(self, DTYPE_t* X, SIZE_t X_stride,
+                    DOUBLE_t* sample_weight, double weighted_n_samples,
                     SIZE_t* samples, SIZE_t start, SIZE_t end) nogil
     cdef void sortS(self) nogil
     cdef double differential_entropy(self, DTYPE_t* src, SIZE_t size)
