@@ -1,3 +1,17 @@
+Entropy (with log_e)
+====================
+The less pure the sets, the higher the absolute entropy.
+The absolute value lies in [0, +inf].
+The value weighted by the number of samples lies in [0, 0.5 * log(0.5)] .
+Entropy is positive (sing it is implicity multiplied with -1).
+
+Information Gain
+================
+The better the split, the higher the information gain value.
+Definded as entropy before the split minus the two (weighted) entropies after the split.
+As entropy can not get worse for a subset, the information gain lies in [0, 0.5 * log(0.5)].
+The information gain is positive.
+
 Covariance matrix
 =================
 (also dispersion matrix or variance–covariance matrix)

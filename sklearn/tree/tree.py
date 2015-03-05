@@ -657,6 +657,9 @@ class UnSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
     
     def fit(self, X, y, sample_weight=None, check_input=True):
         # initialise criterion here, since it requires another syntax than the default ones
+        print 'X:', X
+        print 'y:', y
+        print 'BUILD3:', sample_weight
         if 'unsupervised' == self.criterion:
             self.criterion =  _tree.UnsupervisedClassificationCriterion(X.shape[0], X.shape[1])
         DecisionTreeClassifier.fit(self, X, y, sample_weight, check_input)

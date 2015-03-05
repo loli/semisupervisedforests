@@ -68,7 +68,7 @@ __all__ = ["RandomForestClassifier",
            "ExtraTreesClassifier",
            "ExtraTreesRegressor",
            "SemiSupervisedRandomForestClassifier",
-           "UnSupervisedDecisionTreeClassifier",
+           "UnSupervisedRandomForestClassifier",
            "RandomTreesEmbedding"]
 
 MAX_INT = np.iinfo(np.int32).max

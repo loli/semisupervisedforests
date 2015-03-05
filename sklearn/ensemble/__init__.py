@@ -10,7 +10,7 @@ from .forest import RandomTreesEmbedding
 from .forest import ExtraTreesClassifier
 from .forest import ExtraTreesRegressor
 from .forest import SemiSupervisedRandomForestClassifier
-from .forest import UnSupervisedDecisionTreeClassifier
+from .forest import UnSupervisedRandomForestClassifier
 from .bagging import BaggingClassifier
 from .bagging import BaggingRegressor
 from .weight_boosting import AdaBoostClassifier
@@ -28,7 +28,7 @@ __all__ = ["BaseEnsemble",
            "RandomForestClassifier", "RandomForestRegressor",
            "RandomTreesEmbedding", "ExtraTreesClassifier",
            "SemiSupervisedRandomForestClassifier",
-           "UnSupervisedDecisionTreeClassifier",
+           "UnSupervisedRandomForestClassifier",
            "ExtraTreesRegressor", "BaggingClassifier",
            "BaggingRegressor", "GradientBoostingClassifier",
            "GradientBoostingRegressor", "AdaBoostClassifier",

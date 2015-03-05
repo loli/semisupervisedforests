@@ -72,8 +72,9 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
     # Methods
     cdef void init2(self, DTYPE_t* X, SIZE_t X_stride,
                     SIZE_t* samples, SIZE_t start, SIZE_t end) nogil
+    cdef void sortS(self) nogil
     cdef double differential_entropy(self, DTYPE_t* src, SIZE_t size)
-    cdef print_all(self)
+    #cdef print_all(self)
 
 # =============================================================================
 # Splitter

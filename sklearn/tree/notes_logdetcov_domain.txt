@@ -1,0 +1,314 @@
+###############################################
+Investigation in the domain of log(det(cov(X)))
+###############################################
+
+np.random.seed(171)
+n_samples = 5000
+
+Exp: Changing the mean
+======================
+Multivariate gaussian with one-variance and zero-correlation for all features.
+
+Interpretation
+--------------
+* The expectations, that the choice of the mean does not influence the logdetcov where confirmed
+  - Small changes still observable
+  - With this, one could check the robustness of a cov approximation methods for cases with few observations
+
+Example set
+-----------
+S = np.random.multivariate_normal((meanx,meany), [[1, 0],[0, 1]], n_samples)
+
+Results
+-------
+### mean=(0,0), var=(1,1), p=0. ###
+[[ 1.02964799 -0.00633246]
+ [-0.00633246  1.02936609]]
+det/logdet: 1.05984462602 0.0581223181544
+### mean=(1,1), var=(1,1), p=0. ###
+[[ 0.98641665  0.03391674]
+ [ 0.03391674  1.01840681]]
+det/logdet: 1.00342309022 0.00341724478748
+### mean=(0,10), var=(1,1), p=0. ###
+[[ 0.97825939 -0.01177594]
+ [-0.01177594  1.00666369]]
+det/logdet: 0.984639539304 -0.0154796547314
+### mean=(-10,10), var=(1,1), p=0. ###
+[[ 0.97234417 -0.00890926]
+ [-0.00890926  1.026897  ]]
+det/logdet: 0.998417935572 -0.00158331721326
+
+
+Exp: Changing the variance
+==========================
+Multivariate gaussian with zero-mean and zero-correlation between features.
+
+Interpretation
+--------------
+* A default zero-mean, one-variance gaussian distribution without correlation between features results in a determinant of "1" and a logdet of "0".
+* Higher mean variance over all feature distributions ~ higher absolute det value
+* The application of the log favors sets that are very tight together
+* Decreasing the variance (i.e. making the gaussian smaller) decreases the det accordingly
+  - Since the cov is here (practically) a triangular matrix, its det is simply the product of all diagonal elements
+  => If the features are un-correlated, the detcov reveals the average "tightness" over all feature distributions
+
+Example set
+-----------
+S = np.random.multivariate_normal((0,0), [[var, 0],[0, var]], n_samples)
+
+Results
+-------
+### mean=(0,0), var=(1,1), p=0. ###
+[[ 1.02964799 -0.00633246]
+ [-0.00633246  1.02936609]]
+det/logdet: 1.05984462602 0.0581223181544
+### mean=(0,0), var=(.1,.1), p=0. ###
+[[ 0.09864167  0.00339167]
+ [ 0.00339167  0.10184068]]
+det/logdet: 0.0100342309022 -4.6017529412
+### mean=(0,0), var=(.01,.01), p=0. ###
+[[ 0.00978259 -0.00011776]
+ [-0.00011776  0.01006664]]
+det/logdet: 9.84639539304e-05 -9.22582002671
+### mean=(0,0), var=(.001,.001), p=0. ###
+[[  9.72344170e-04  -8.90925520e-06]
+ [ -8.90925520e-06   1.02689700e-03]]
+det/logdet: 9.98417935572e-07 -13.8170938752
+### mean=(0,0), var=(.0001,.0001), p=0. ###
+[[  9.87891304e-05   1.26026554e-06]
+ [  1.26026554e-06   9.79599898e-05]]
+det/logdet: 9.67579393475e-09 -18.453638541
+### mean=(0,0), var=(.00001,.00001), p=0. ###
+[[  1.00749879e-05   3.05625692e-07]
+ [  3.05625692e-07   1.00799628e-05]]
+det/logdet: 1.01462095991e-10 -23.0113358257
+
+### mean=(0,0), var=(1,10), p=0. ###
+[[  1.02936609e+00  -6.33246161e-02]
+ [ -6.33246161e-02   1.02964799e+02]]
+det/logdet: 105.984462602 4.66329250414
+### mean=(0,0), var=(10,10), p=0. ###
+[[  98.64166526    3.39167432]
+ [   3.39167432  101.84068092]]
+det/logdet: 10034.2309022 9.21375761676
+### mean=(0,0), var=(100,1), p=0. ###
+[[  9.78259391e+03  -1.17759354e+00]
+ [ -1.17759354e+00   1.00666369e+00]]
+det/logdet: 9846.39539304 9.19486071724
+### mean=(0,0), var=(100,100), p=0. ###
+[[  9723.44170075    -89.09255204]
+ [   -89.09255204  10268.9699916 ]]
+det/logdet: 99841793.5572 18.4190974267
+
+### mean=(0,0), var=(100,.01), p=0. ###
+[[  9.87891304e+03   1.26026554e-02]
+ [  1.26026554e-02   9.79599898e-05]]
+det/logdet: 0.967579393475 -0.0329577970057
+
+
+Exp: Correlation between features
+=================================
+Multivariate gaussian with zero-mean, equal variance for all features and different correlation values between them.
+
+Interpretation
+--------------
+* Complete correlation (p=1/-1) leads to near-zero det values and hence errors int he computation of the logdet (which should be -inf)
+* Stronger correlation between features lowers the absolute value of the det
+* If the correlation is positive or negative does neither influence the det absolute value nor its sign
+=> Highly correlated features are considered "better" (because they are tighter packed) as non-correlated features
+
+Example set
+-----------
+S = np.random.multivariate_normal((0,0), [[1, pval],[pval, 1]], n_samples) # pval \in [-1, 1], where -1/1 very tight high and 0 means none
+
+Results
+-------
+### mean=(0,0), var=(1,1), p=0. ###
+[[ 1.02964799 -0.00633246]
+ [-0.00633246  1.02936609]]
+det/logdet: 1.05984462602 0.0581223181544
+### mean=(0,0), var=(1,1), p=0.25 ###
+[[ 1.03125271  0.23460785]
+ [ 0.23460785  0.96557322]]
+det/logdet: 0.940709147086 -0.0611212763501
+### mean=(0,0), var=(1,1), p=0.5 ###
+[[ 0.97516221  0.48202862]
+ [ 0.48202862  0.99555873]]
+det/logdet: 0.738479654478 -0.303161727183
+### mean=(0,0), var=(1,1), p=0.75 ###
+[[ 0.97327036  0.72243902]
+ [ 0.72243902  0.98505619]]
+det/logdet: 0.436807846813 -0.828261890398
+### mean=(0,0), var=(1,1), p=1. ###
+[[ 0.9878913  0.9878913]
+ [ 0.9878913  0.9878913]]
+det/logdet: -2.1935593427e-16 nan
+
+### mean=(0,0), var=(1,1), p=0. ###
+[[ 1.02964799 -0.00633246]
+ [-0.00633246  1.02936609]]
+det/logdet: 1.05984462602 0.0581223181544
+### mean=(0,0), var=(1,1), p=-0.25 ###
+[[ 0.96557322 -0.23460785]
+ [-0.23460785  1.03125271]]
+det/logdet: 0.940709147086 -0.0611212763501
+### mean=(0,0), var=(1,1), p=-0.5 ###
+[[ 0.99555873 -0.48202862]
+ [-0.48202862  0.97516221]]
+det/logdet: 0.738479654478 -0.303161727183
+### mean=(0,0), var=(1,1), p=-0.75 ###
+[[ 0.98505619 -0.72243902]
+ [-0.72243902  0.97327036]]
+det/logdet: 0.436807846813 -0.828261890398
+### mean=(0,0), var=(1,1), p=-1. ###
+[[ 0.9878913 -0.9878913]
+ [-0.9878913  0.9878913]]
+det/logdet: -2.1935593427e-16 nan
+
+
+Exp: Correlation between features in 3D
+=======================================
+Multivariate gaussian with zero-mean, one-variance for all features and different correlation values between them.
+
+Interpretation
+--------------
+* Every non-zero correlation decreases the resulting absolute det value, but each additional less
+  => I.e. sets with larger amounts of features are likely to be more heavily affected by the many possible correlations between them
+  => This effect will diminuish for large amount of features (i.e. large difference between 2 and 3 features, but very little between 1000 and 1001)
+* Which two features are correlated does not affect the absolute det value
+* Higher correlations superseed lower ones i.e. two correlations of .75 and .25 do not lead to a abs det value as two correlations of .5, but a considerably lower one
+  => This means two highly correlated features can easily make a set seem very dense in terms of distribution [not good]
+
+Example set
+-----------
+S = np.random.multivariate_normal((0,0,0), [[1, pval1, pval2],[pval1, 1, pval3],[pval2, pval3, 1]], n_samples) # pval \in [-1, 1], where -1/1 very tight high and 0 means none
+
+Results
+-------
+### mean=(0,0,0), var=(1,1,1), p(s)=0.,0.,0. ###
+[[ 1.04965634  0.01009199 -0.00943638]
+ [ 0.01009199  1.02481211  0.005906  ]
+ [-0.00943638  0.005906    0.99438274]]
+det/logdet: 1.06942776802 0.0671237091782
+### mean=(0,0,0), var=(1,1,1), p(s)=0.5,0.,0. ###
+[[ 0.97825604  0.48911536 -0.02266695]
+ [ 0.48911536  0.9906091  -0.00451201]
+ [-0.02266695 -0.00451201  1.00685649]]
+det/logdet: 0.734410783649 -0.308686756166
+### mean=(0,0,0), var=(1,1,1), p(s)=0.,0.,0.5 ###
+[[ 0.96490619 -0.01367368 -0.00763283]
+ [-0.01367368  0.9942665   0.49765272]
+ [-0.00763283  0.49765272  1.01301933]]
+det/logdet: 0.732753899177 -0.310945378112
+### mean=(0,0,0), var=(1,1,1), p(s)=0.5,0.5,0. ###
+[[ 0.99016703  0.49099641  0.47273612]
+ [ 0.49099641  1.02738604 -0.0211729 ]
+ [ 0.47273612 -0.0211729   0.95457913]]
+det/logdet: 0.501077845997 -0.690993808737
+### mean=(0,0,0), var=(1,1,1), p(s)=0.5,0.,0.5 ###
+[[ 1.0211799   0.48963119 -0.01080108]
+ [ 0.48963119  0.97979788  0.49340676]
+ [-0.01080108  0.49340676  1.00537563]]
+det/logdet: 0.510961435138 -0.671461161024
+### mean=(0,0,0), var=(1,1,1), p(s)=0.5,0.5,0.5 ###
+[[ 0.95439894  0.47866128  0.4893188 ]
+ [ 0.47866128  0.98784055  0.49362333]
+ [ 0.4893188   0.49362333  0.99856714]]
+det/logdet: 0.474811487316 -0.744837422528
+
+### mean=(0,0,0), var=(1,1,1), p(s)=0.5,0.25,0. ###
+[[ 1.04529321  0.5384734   0.26237539]
+ [ 0.5384734   1.03802498 -0.00507702]
+ [ 0.26237539 -0.00507702  1.01643188]]
+det/logdet: 0.735231590515 -0.307569740263
+### mean=(0,0,0), var=(1,1,1), p(s)=0.75,0.25,0. ###
+[[ 0.98759866  0.73878988  0.23680535]
+ [ 0.73878988  0.99409643 -0.02497573]
+ [ 0.23680535 -0.02497573  0.99162379]]
+det/logdet: 0.367205391825 -1.00183393673
+### mean=(0,0,0), var=(1,1,1), p(s)=1.,0.,0. ###
+[[ 1.00086376  1.00086376 -0.01230132]
+ [ 1.00086376  1.00086376 -0.01230132]
+ [-0.01230132 -0.01230132  0.96490619]]
+det/logdet: 2.14403675944e-16 -36.0786710996
+
+
+Exp: Influence of variance vs. correlation
+==========================================
+Multivariate gaussian with zero-mean, equal variance for all features and different correlation values between them.
+
+Interpretation
+--------------
+* The impact of a higher variance on the absolute det value is a good deal higher than the influence of the in-between feature correlation
+  => Variance in the deciding factor!
+
+Example set
+-----------
+S = np.random.multivariate_normal((0,0,0), [[var, pval1, pval2],[pval1, var, pval3],[pval2, pval3, var]], n_samples) # pval \in [-1, 1], where -1/1 very tight high and 0 means none
+
+Results
+-------
+### mean=(0,0,0), var=(1,1,1), p(s)=0.,0.,0. ###
+[[ 1.04965634  0.01009199 -0.00943638]
+ [ 0.01009199  1.02481211  0.005906  ]
+ [-0.00943638  0.005906    0.99438274]]
+det/logdet: 1.06942776802 0.0671237091782
+### mean=(0,0,0), var=(2,2,2), p(s)=.99,0.,0. ###
+[[ 4.19219521  4.15774456 -0.04193738]
+ [ 4.15774456  4.20284453 -0.03859644]
+ [-0.04193738 -0.03859644  4.09924844]]
+det/logdet: 1.36202320535 0.308971245286
+### mean=(0,0,0), var=(10,10,10), p(s)=.99,0.,0. ###
+[[  98.14005343   97.25002881   -1.69362474]
+ [  97.25002881   98.34127305   -1.4368751 ]
+ [  -1.69362474   -1.4368751   100.68564925]]
+det/logdet: 19486.3661262 9.877470327
+
+
+Exp: Behaviour of different cov computation methods in the presence of outliers
+===============================================================================
+
+Speed
+-----
+2-features
+                MCD     emprirical
+10 samples      24.4ms  30us
+100 samples     40.8ms  37us
+1000 samples    1.12s   138us
+
+Interpretation
+--------------
+Bias-introducing methods:
+* Shrinkage is heavily parameter dependent
+* LedoitWolf has a high error in the presence of outliers
+* OAS is +/- as good as the empirical co-variance
+* The default, i.e. the empirical co-variance, is the best
+Outlier robust MCD estimator:
+* Very low error, way lower than empirical co-variance (see figures in this folder)
+  => But very, very slow!
+  
+====> Overall, I'll have to stay with my empirical cov computation implementation!
+
+Results
+-------
+see figures in this folder
+
+Exp: Percentage of outliers
+===========================
+
+Interpretations
+---------------
+* Latest with 10.000 samples, log-det-cov is very robust; i.e. 10% outlier in 10k samples produces the same value as 10% outlier in 10 billion samples
+* The higher the outlier weight, the higher log-det-cov
+* The larger the amount of outliers, the higher log-det-cov
+* Set with more outliers always > set with fewer outliers; but only slightly
+* Large oultiers > weak outliers; stronlgy so
+* Few very strong outliers > many weak outliers
+
+Results
+-------
+The image percentage_of_outliers_and_outlier_weight.png shows the log-det-cov for a sample set size of 10.000 (representative also for larger ones!) and the percentage of outliers in the set (po) plotted against the weight of the outliers (multiplier).
+
+
+Exp: log-det-cov for very few samples and pure outliers
+=======================================================
