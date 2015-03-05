@@ -61,22 +61,20 @@ cdef class Criterion:
 
 cdef class UnsupervisedClassificationCriterion(Criterion):
     # Internal structures
-    cdef DTYPE_t* X
-    cdef SIZE_t X_stride
-    cdef DTYPE_t* S
-    cdef SIZE_t n_samples
-    cdef SIZE_t n_features
-    # !TODO: I'll then also have to remove the n_node_samples_left and n_node_samples_right, as they'll be unused; same goes for n_samples, I think
-    cdef SIZE_t n_node_samples_left
-    cdef SIZE_t n_node_samples_right
+    cdef DTYPE_t* X             # pointer to the training data; will become obsolute, when I've implemented sort(S) without re-copying the memory
+    cdef SIZE_t X_stride        # the X_stride; is this the same as n_features... might just be, then I can remove the second and use this in __reduce__
+    cdef DTYPE_t* S             # copy of the training data for fitting multi-variate Gaussians
+    cdef SIZE_t n_samples       # might not be required, as only used in __cinit__ and __reduce__
+    cdef SIZE_t n_features      # might not be required, as only used in __cinit__ and __reduce__
+    # !TODO: Above, some of the member vars could be removed in the future.
      
     # Methods
     cdef void init2(self, DTYPE_t* X, SIZE_t X_stride,
                     DOUBLE_t* sample_weight, double weighted_n_samples,
                     SIZE_t* samples, SIZE_t start, SIZE_t end) nogil
+    #!TODO: sortS should actually not be a method, but be performed in impurity_improvement together with sort(xf, samples, ...)
     cdef void sortS(self) nogil
     cdef double differential_entropy(self, DTYPE_t* src, SIZE_t size)
-    #cdef print_all(self)
 
 # =============================================================================
 # Splitter

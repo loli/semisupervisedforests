@@ -394,8 +394,6 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         self.n_samples = n_samples # X.shape[0]
         self.n_features = n_features # X.shape[1]
         self.n_node_samples = 0 # size of S
-        self.n_node_samples_left = 0 # size of S_left
-        self.n_node_samples_right = 0 # size of S_right
         self.weighted_n_node_samples = 0.0 # total weight of all node samples (all in S)
         self.weighted_n_left = 0.0 # weight of all samples in S_left
         self.weighted_n_right = 0.0 # weight of all samples in S_right       
@@ -470,6 +468,12 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         cdef SIZE_t i = 0
         cdef SIZE_t p = 0
         
+        #!TODO: What is with zero-weight samples? Are they already removed from "samples"
+        #       or would I have to take care of this here? After all, they should not figure
+        #       in the entropy computation.
+        #       This is anyway a problem, as the weight figure in the information gain, but not
+        #       directly in the entropy computation -> could this be a problem?
+        
         if sample_weight == NULL:
             weighted_n_node_samples = 1.0 * n_node_samples
         else:
@@ -490,20 +494,11 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         self.pos = self.start
         
         self.weighted_n_left = 0.0
-        self.weighted_n_right = self.weighted_n_node_samples       
-        
-        self.n_node_samples_left = 0
-        self.n_node_samples_right = self.n_node_samples
+        self.weighted_n_right = self.weighted_n_node_samples
 
     cdef void update(self, SIZE_t new_pos) nogil:
         """Update the collected statistics by moving samples[pos:new_pos] from
-            the right child to the left child."""
-        cdef SIZE_t start = self.start
-        cdef SIZE_t end = self.end
-        
-        self.n_node_samples_left = new_pos - start
-        self.n_node_samples_right = end - new_pos
-        
+            the right child to the left child.""" 
         cdef DOUBLE_t* sample_weight = self.sample_weight
         cdef SIZE_t* samples = self.samples
         cdef SIZE_t pos = self.pos
@@ -542,16 +537,14 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
                                 double* impurity_right) nogil:
         cdef SIZE_t start = self.start
         cdef SIZE_t pos = self.pos
+        cdef SIZE_t end = self.end
         cdef SIZE_t X_stride = self.X_stride
-        cdef SIZE_t n_node_samples_left = self.n_node_samples_left
-        cdef SIZE_t n_node_samples_right = self.n_node_samples_right
         cdef DTYPE_t* S = self.S
         
         #!TODO: Remove the "with gil:" here, when differential_entropy finally nogil function
-        #!TODO: When n_node_samples_left and n_node_samples_right are removed, simply compute their values here from start, pos and end
         with gil:
-            impurity_left[0] = self.differential_entropy(S + start * X_stride, n_node_samples_left)
-            impurity_right[0] = self.differential_entropy(S + pos * X_stride, n_node_samples_right)
+            impurity_left[0] = self.differential_entropy(S + start * X_stride, pos - start)
+            impurity_right[0] = self.differential_entropy(S + pos * X_stride, end - pos)
 
     cdef void node_value(self, double* dest) nogil:
         """Compute the node value of samples[start:end] into dest."""
@@ -560,37 +553,7 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         # I must figure out    1. how many variables this will be and
         #                      2. how to ensure that the tree provides the required size (n_classes/output * n_outputs * double)
         pass
-    
-#     cdef double impurity_improvement(self, double impurity) nogil:
-#         """Weighted impurity improvement, i.e.
-# 
-#            N_t / N * (impurity - N_t_L / N_t * left impurity
-#                                - N_t_L / N_t * right impurity),
-# 
-#            where N is the total number of samples, N_t is the number of samples
-#            in the current node, N_t_L is the number of samples in the left
-#            child and N_t_R is the number of samples in the right child."""
-#         cdef double impurity_left
-#         cdef double impurity_right
-# 
-#         self.children_impurity(&impurity_left, &impurity_right)
-#         
-#         with gil:
-#             print 'weights:'
-#             print self.weighted_n_node_samples == self.n_node_samples
-#             print self.weighted_n_samples == self.n_samples
-#             print self.weighted_n_right == self.n_node_samples_right
-#             print self.weighted_n_left == self.n_node_samples_left
-# 
-#         #!TODO: Maybe re-introduce sample weights here
-#         #!TODO: Why does float seem to be required here suddenly, and not in the original impurity above?
-#         #       Answer: Because the original version used the n_node_samlple_weight variables, which are defined as double.
-#         # !TODO: Fix the node weights and then remove this whole function (i.e. use the parent one)
-#         # !TODO: I'll then also have to remove the n_node_samples_left and n_node_samples_right, as they'll be unused
-#         return (self.n_node_samples / float(self.n_samples) *
-#                 (impurity - self.n_node_samples_right / float(self.n_node_samples) * impurity_right
-#                           - self.n_node_samples_left / float(self.n_node_samples) * impurity_left))
-    
+
     cdef double differential_entropy(self, DTYPE_t* src, SIZE_t size):
         """Compute the differential entropy (also called continuous- or unsupervised-),
         which is defined as log(det(cov(S))) of a set S of observations identified
@@ -1324,7 +1287,6 @@ cdef class Splitter:
         self.rand_r_state = self.random_state.randint(0, RAND_R_MAX)
         # Initialize samples and features structures
         cdef SIZE_t n_samples = X.shape[0]
-        print 'init:N_SAMPLES-base:', n_samples
         cdef SIZE_t* samples = safe_realloc(&self.samples, n_samples)
 
         cdef SIZE_t i, j
@@ -1574,10 +1536,6 @@ cdef class BestSplitter(BaseDenseSplitter):
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
                             
-                            with gil:
-                                print '## Computing improvement ##'
-                                print 'current-pos', current.pos
-                                print 'feature', f_i
                             current.improvement = self.criterion.impurity_improvement(impurity)
 
                             if current.improvement > best.improvement:
@@ -1589,8 +1547,6 @@ cdef class BestSplitter(BaseDenseSplitter):
                                     current.threshold = Xf[p - 1]
 
                                 best = current  # copy
-                                with gil:
-                                    print 'best', best.pos, best.threshold
 
         # Reorganize into samples[start:best.pos] + samples[best.pos:end]
         if best.pos < end:
@@ -1620,9 +1576,6 @@ cdef class BestSplitter(BaseDenseSplitter):
                sizeof(SIZE_t) * n_found_constants)
 
         # Return values
-        with gil:
-            print
-            print 'e-best', best.pos        
         split[0] = best
         n_constant_features[0] = n_total_constants
 
@@ -1796,11 +1749,7 @@ cdef class UnSupervisedBestSplitter(BestSplitter):
                             if ((self.criterion.weighted_n_left < min_weight_leaf) or
                                     (self.criterion.weighted_n_right < min_weight_leaf)):
                                 continue
-                            
-                            with gil:
-                                print '## Computing improvement ##'
-                                print 'current-pos', current.pos
-                                print 'feature', current.feature
+
                             current.improvement = self.criterion.impurity_improvement(impurity)
 
                             if current.improvement > best.improvement:
@@ -1812,8 +1761,6 @@ cdef class UnSupervisedBestSplitter(BestSplitter):
                                     current.threshold = Xf[p - 1]
 
                                 best = current  # copy
-                                with gil:
-                                    print 'best', best.pos, best.threshold
 
         # Reorganize into samples[start:best.pos] + samples[best.pos:end]
         if best.pos < end:
@@ -1843,9 +1790,7 @@ cdef class UnSupervisedBestSplitter(BestSplitter):
                sizeof(SIZE_t) * n_found_constants)
 
         # Return values
-        with gil:
-            print
-            print 'e-best', best.pos        
+        with gil: print 'e-best', best.pos, best.feature, best.threshold
         split[0] = best
         n_constant_features[0] = n_total_constants
 
@@ -3245,9 +3190,7 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
         cdef SIZE_t min_samples_split = self.min_samples_split
 
         # Recursive partition (without actual recursion)
-        print 'S:N_SAMPLES-preinit:', splitter.n_samples
         splitter.init(X, y, sample_weight_ptr)
-        print 'S:N_SAMPLES-postinit:', splitter.n_samples
 
         cdef SIZE_t start
         cdef SIZE_t end
