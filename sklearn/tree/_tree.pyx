@@ -552,7 +552,48 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         #       represented by this leaf node should be written into the given memory.
         # I must figure out    1. how many variables this will be and
         #                      2. how to ensure that the tree provides the required size (n_classes/output * n_outputs * double)
-        pass
+        
+        # memory space provide:
+        #     [n_outputs, max_n_classes] of double
+        # original purpose:
+        #     Contains the constant prediction value of each node.
+        # I require:
+        #     n_features + n_features^2 + 1 of double
+        #     mu           cov            frac/Z
+        
+        # Computation order:
+        #    Here I can calculate the cov, mu and frac
+        #    Afterwards, I'll have to come back to the tree and calculate
+        #    partition funtion Z and replace frac by  frac/Z for each node
+        
+        # !TODO: replace with nogil version
+        # !TODO: Very crude version!
+        # convert memory block to numpy array
+        cdef SIZE_t X_stride = self.X_stride
+        cdef SIZE_t start = self.start
+        cdef DTYPE_t* S = self.S
+        cdef SIZE_t n_node_samples = self.n_node_samples
+        cdef DTYPE_t [:,::1] arr_view
+        cdef DTYPE_t* covp = NULL
+        cdef DTYPE_t* mup = NULL
+              
+        with gil:
+            arr_view = <DTYPE_t[:n_node_samples,:X_stride]> (S + start * X_stride)
+            arr = np.asarray(arr_view).copy()
+
+            cov = np.cov(arr, rowvar=0, ddof=1)
+            mu = np.mean(arr, axis=0)
+            frac = self.weighted_n_node_samples / self.weighted_n_samples
+            
+            #covp = &cov.flatten()[0]
+            #mup = &mu[0]
+        
+        #!TODO: Does not work, see [...].tree_.value
+        memcpy(dest, &frac, sizeof(double))
+        dest += 1
+        memcpy(dest, mup, self.n_features * sizeof(double))
+        dest += self.n_features
+        memcpy(dest, covp, self.n_features * self.n_features * sizeof(double))
 
     cdef double differential_entropy(self, DTYPE_t* src, SIZE_t size):
         """Compute the differential entropy (also called continuous- or unsupervised-),

@@ -655,7 +655,10 @@ class UnSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
             class_weight=class_weight,
             random_state=random_state)
     
-    def fit(self, X, y, sample_weight=None, check_input=True):
+    def fit(self, X, y=None, sample_weight=None, check_input=True):
+        # !TODO: replace this crude method to get the tree to provide sufficient memory for storing the leaf values
+        # remove passed y (which we do not need and only keep for interface conformity reasons)
+        y = np.zeros((X.shape[0], X.shape[1]**2 + X.shape[1] + 1))
         # initialise criterion here, since it requires another syntax than the default ones
         if 'unsupervised' == self.criterion:
             self.criterion =  _tree.UnsupervisedClassificationCriterion(X.shape[0], X.shape[1])
