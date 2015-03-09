@@ -580,6 +580,7 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         with gil:
             arr_view = <DTYPE_t[:n_node_samples,:X_stride]> (S + start * X_stride)
             arr = np.asarray(arr_view).copy()
+            print arr.shape
 
             cov = np.cov(arr, rowvar=0, ddof=1)
             mu = np.mean(arr, axis=0)
