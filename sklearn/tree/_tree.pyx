@@ -438,8 +438,11 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         #       To check this, I must output the results S_left and S_right sets at deeper levels (e.g 2)
         for i in range(n_node_samples):
             memcpy(S + (start + i) * X_stride,
-                   X + samples[i] * X_stride,
+                   X + samples[i + start] * X_stride,
                    X_stride * sizeof(DTYPE_t))
+            
+        with gil:
+            print '### SORTS ###'
         
 
     cdef void init2(self, DTYPE_t* X, SIZE_t X_stride,
@@ -574,27 +577,57 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         cdef DTYPE_t* S = self.S
         cdef SIZE_t n_node_samples = self.n_node_samples
         cdef DTYPE_t [:,::1] arr_view
-        cdef DTYPE_t* covp = NULL
-        cdef DTYPE_t* mup = NULL
+        
+        cdef double [:, ::1] mcov
+        cdef double [::1] mmu
+        
+        cdef SIZE_t i = 0
+        cdef SIZE_t p = self.n_samples
+        
+        with gil:
+            print '### NODE_VALUE ###'
+            print 'start/pos/end', self.start, self.pos, self.end
+            print 'n_node_samples/end-start', self.n_node_samples, self.end - self.start
+            print 'n_samples', self.n_samples
+            print 'S:'
+            for i in range(p):
+                print i, self.S[i*2], self.S[i*2+1]
               
         with gil:
-            arr_view = <DTYPE_t[:n_node_samples,:X_stride]> (S + start * X_stride)
-            arr = np.asarray(arr_view).copy()
-            print arr.shape
+            arr_view = <DTYPE_t[:n_node_samples,:X_stride]> &S[start * X_stride]
+            arr = np.asarray(arr_view).copy().astype(np.float64)
+            print '-----------------'
+            print 'S[0]', S[0]
+            print 'self.S[0]', self.S[0]
+            print 'S[1]', S[1]
+            print 'self.S[1]', self.S[1]
+            print 'start * X_stride', start * X_stride
+            print 'self.S[start * X_stride]', self.S[start * X_stride]
+            print '-----------------'
+            print 'arr.shape', arr.shape
+            print 'arr:'
+            print arr
 
             cov = np.cov(arr, rowvar=0, ddof=1)
             mu = np.mean(arr, axis=0)
             frac = self.weighted_n_node_samples / self.weighted_n_samples
             
-            #covp = &cov.flatten()[0]
-            #mup = &mu[0]
+            mcov = cov
+            mmu = mu
+            
+            print '-----------------'
+            print 'frac:', frac
+            print 'cov:'
+            print cov
+            print 'mu:'
+            print mu
         
         #!TODO: Does not work, see [...].tree_.value
         memcpy(dest, &frac, sizeof(double))
         dest += 1
-        memcpy(dest, mup, self.n_features * sizeof(double))
-        dest += self.n_features
-        memcpy(dest, covp, self.n_features * self.n_features * sizeof(double))
+        memcpy(dest, &mcov[0,0], self.n_features * self.n_features * sizeof(double))
+        dest += self.n_features * self.n_features
+        memcpy(dest, &mmu[0], self.n_features * sizeof(double))
 
     cdef double differential_entropy(self, DTYPE_t* src, SIZE_t size):
         """Compute the differential entropy (also called continuous- or unsupervised-),
