@@ -34,6 +34,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.tree import ExtraTreeClassifier
 from sklearn.tree import ExtraTreeRegressor
+from sklearn.tree import UnSupervisedDecisionTreeClassifier
 
 from sklearn import tree
 from sklearn.tree.tree import SPARSE_SPLITTERS
@@ -53,6 +54,10 @@ CLF_TREES = {
     "ExtraTreeClassifier": ExtraTreeClassifier,
 }
 
+DEN_TREES = {
+    "UnSupervisedDecisionTreeClassifier": UnSupervisedDecisionTreeClassifier
+}
+
 REG_TREES = {
     "DecisionTreeRegressor": DecisionTreeRegressor,
     "Presort-DecisionTreeRegressor": partial(DecisionTreeRegressor,
@@ -63,6 +68,7 @@ REG_TREES = {
 ALL_TREES = dict()
 ALL_TREES.update(CLF_TREES)
 ALL_TREES.update(REG_TREES)
+ALL_TREES.update(DEN_TREES)
 
 SPARSE_TREES = [name for name, Tree in ALL_TREES.items()
                 if Tree().splitter in SPARSE_SPLITTERS]

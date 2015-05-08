@@ -10,6 +10,7 @@ randomized trees. Single and multi-output problems are both handled.
 #          Satrajit Gosh <satrajit.ghosh@gmail.com>
 #          Joly Arnaud <arnaud.v.joly@gmail.com>
 #          Fares Hedayati <fares.hedayati@gmail.com>
+#          Oskar Maier <oskar.maier@googlemail.com>
 #
 # Licence: BSD 3 clause
 
@@ -34,6 +35,10 @@ from ._tree import Splitter
 from ._tree import DepthFirstTreeBuilder, BestFirstTreeBuilder
 from ._tree import Tree
 from . import _tree
+from scipy.stats import mvn
+import warnings
+from scipy.stats._multivariate import multivariate_normal
+from itertools import izip
 
 __all__ = ["DecisionTreeClassifier",
            "DecisionTreeRegressor",
@@ -656,6 +661,8 @@ class UnSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
             random_state=random_state)
     
     def fit(self, X, y=None, sample_weight=None, check_input=True):
+        if check_input:
+            X = check_array(X, dtype=DTYPE)
         # !TODO: replace this crude method to get the tree to provide sufficient memory for storing the leaf values
         # remove passed y (which we do not need and only keep for interface conformity reasons)
         y = np.zeros((X.shape[0], X.shape[1]**2 + X.shape[1] + 1))
@@ -663,7 +670,201 @@ class UnSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
         if 'unsupervised' == self.criterion:
             self.criterion =  _tree.UnsupervisedClassificationCriterion(X.shape[0], X.shape[1])
         DecisionTreeClassifier.fit(self, X, y, sample_weight, check_input)
+        return self
 
+    def predict_proba(self, X):
+        """Predict density distribution membership probabilities of the input samples X.
+
+        Parameters
+        ----------
+        X : array-like or sparse matrix of shape = [n_samples, n_features]
+            The input samples. Internally, it will be converted to
+            ``dtype=np.float32``. No sparse matrixes allowed.
+
+        Returns
+        -------
+        p : array of length n_samples
+            The density distribution membership probability of the input
+            samples.
+        """
+        check_is_fitted(self, 'n_outputs_')
+        X = check_array(X, dtype=DTYPE, accept_sparse=None)
+
+        n_samples, n_features = X.shape
+
+        if self.tree_ is None:
+            raise NotFittedError("Tree not initialized. Perform a fit first.")
+
+        if self.n_features_ != n_features:
+            raise ValueError("Number of features of the model must "
+                             " match the input. Model n_features is %s and "
+                             " input n_features is %s "
+                             % (self.n_features_, n_features))
+
+        # extract leaf values and leaf definition bounding boxes from the tree
+        info = self.parse_tree_leaves()
+        
+        # compute the integral of the partition function
+        # !TODO: This could be computed once for the first application, and
+        # then re-used; but how to avoid re-training?
+        pfi = self.compute_partition_function(info) # Modifies info objects range entries in-place!
+        
+        # returns the indices of the node (alle leaves) each sample dropped
+        # into
+        leaf_indices = self.tree_.apply(X)
+
+        # construct the the associated multivariate Gaussian distribution for each unique
+        # leaf and pass the associated samples through its pdf to obtain their density
+        # values
+        out = np.zeros(n_samples, np.float)
+        for lidx in np.unique(leaf_indices):
+            mnd = multivariate_normal(info[lidx]['mu'], info[lidx]['cov'])
+            mask = lidx == leaf_indices
+            out[mask] = info[lidx]['frac'] / pfi * mnd.pdf(X[mask])
+        
+        # return
+        return out
+        
+    def compute_partition_function(self, info):
+        r"""
+        Computes the partition function of the tree. In the present case of
+        axis-aligned weak learners, this is equivalent to the sum of the
+        leaf-wise cumulative multivariate normal distributions.
+        
+        Warning
+        -------
+        Modifies info object in-place!
+        
+        Parameters
+        ----------
+        info : list of dicts
+            As returned by `parse_tree_leaves()`.
+        
+        Returns
+        -------
+        z : float
+            The partition function value for the tree.
+        """
+        info = self.info_inf_to_large(info)
+        z = 0
+        for leaf_info in info:
+            if leaf_info is None:
+                continue
+            lower = [r[0] for r in leaf_info['range']]
+            upper = [r[1] for r in leaf_info['range']]
+            integral, _ = mvn.mvnun(lower, upper, leaf_info['mu'], leaf_info['cov'])
+            z += leaf_info['frac'] * integral
+        
+        return z
+    
+    def info_inf_to_large(self, info, mult = 100):
+        r"""
+        Replaces the +/-inf objects in a tree leaves info object by the associated
+        dimensions variance, multiplied by `mult`.
+        
+        Warning
+        -------
+        Modifies info object in-place!
+        
+        Parameters
+        ----------
+        info : list of dicts
+            As returned by `parse_tree_leaves()`.
+        mult : number
+            The multiplicator, choose sufficiently high.
+        
+        Returns
+        -------
+        info : list of dicts
+            The modified tree leaves info object.
+        """
+        for leaf_info in info:
+            if leaf_info is None:
+                continue
+            rang = leaf_info['range']
+            for i in range(len(rang)):
+                l, u = rang[i]
+                if np.isneginf(l):
+                    l = -1 * mult * leaf_info['cov'][i, i]
+                if np.isposinf(u):
+                    u = mult * leaf_info['cov'][i, i]
+                rang[i] = (l, u)
+        return info
+        
+    def parse_tree_leaves(self):
+        r"""
+        Returns information about the leaves of this density tree.
+            
+        Returns
+        -------
+        info : list of dicts
+            List containing a dict with the keys ['frac', 'cov', 'mu', 'range']
+            for each leaf node and None for each internal node.
+        """
+        return self.__parse_tree_leaves_rec(self.tree_)
+        
+    def __parse_tree_leaves_rec(self, tree, pos = 0, rang = None):
+        # init
+        if rang is None:
+            rang = [(-np.inf, np.inf)] * tree.n_features
+        
+        # get node info
+        fid = tree.feature[pos]
+        thr = tree.threshold[pos]
+        
+        # if not leave node...
+        if not -2 == fid:
+            
+            info = [None]
+    
+            # ...update range of cell and ascend to left node
+            lrang = rang[:]
+            lrang[fid] = (lrang[fid][0], min(lrang[fid][1], thr))
+            info.extend(self.__parse_tree_leaves_rec(tree, tree.children_left[pos], lrang))
+            
+            # ...update range of cell and ascend to right node
+            rrang = rang[:]
+            rrang[fid] = (max(rrang[fid][0], thr), rrang[fid][1])
+            info.extend(self.__parse_tree_leaves_rec(tree, tree.children_right[pos], rrang))
+            
+            return info
+            
+        # if leave node, return information
+        else:
+            nval = tree.value[pos]
+            frac = nval[0]
+            cov = np.squeeze(nval[1:5]).reshape((2,2))
+            mu = np.squeeze(nval[5:7])
+            
+            return [{'frac': frac,
+                     'cov': cov,
+                     'mu': mu,
+                     'range': rang}]
+
+        
+    def predict_log_proba(self, X):
+        """Predict density distribution membership log-probabilities of the input samples X.
+
+        Parameters
+        ----------
+        X : array-like or sparse matrix of shape = [n_samples, n_features]
+            The input samples. Internally, it will be converted to
+            ``dtype=np.float32``. No sparse matrixes allowed.
+
+        Returns
+        -------
+        p : array of length n_samples
+            The density distribution membership log-probability of the
+            input samples.
+        """
+        return np.log(self.predict_proba(X)) # self.n_outputs is set to > 1, even if only one outcome enforced
+    
+    def predict(self, X):
+        """Not supported for density forest.
+        
+        Only kept for interface consistency reasons.
+        """
+        raise NotImplementedError("Density forest do not support the predict() method.")
 
 class SemiSupervisedDecisionTreeClassifier(DecisionTreeClassifier):
     def __init__(self,

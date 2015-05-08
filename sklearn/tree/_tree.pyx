@@ -441,8 +441,8 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
                    X + samples[i + start] * X_stride,
                    X_stride * sizeof(DTYPE_t))
             
-        with gil:
-            print '### SORTS ###'
+        #with gil:
+        #    print '### SORTS ###'
         
 
     cdef void init2(self, DTYPE_t* X, SIZE_t X_stride,
@@ -584,29 +584,29 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
         cdef SIZE_t i = 0
         cdef SIZE_t p = self.n_samples
         
-        with gil:
-            print '### NODE_VALUE ###'
-            print 'start/pos/end', self.start, self.pos, self.end
-            print 'n_node_samples/end-start', self.n_node_samples, self.end - self.start
-            print 'n_samples', self.n_samples
-            print 'S:'
-            for i in range(p):
-                print i, self.S[i*2], self.S[i*2+1]
+        #with gil:
+        #    print '### NODE_VALUE ###'
+        #    print 'start/pos/end', self.start, self.pos, self.end
+        #    print 'n_node_samples/end-start', self.n_node_samples, self.end - self.start
+        #    print 'n_samples', self.n_samples
+        #    print 'S:'
+        #    for i in range(p):
+        #        print i, self.S[i*2], self.S[i*2+1]
               
         with gil:
             arr_view = <DTYPE_t[:n_node_samples,:X_stride]> &S[start * X_stride]
             arr = np.asarray(arr_view).copy().astype(np.float64)
-            print '-----------------'
-            print 'S[0]', S[0]
-            print 'self.S[0]', self.S[0]
-            print 'S[1]', S[1]
-            print 'self.S[1]', self.S[1]
-            print 'start * X_stride', start * X_stride
-            print 'self.S[start * X_stride]', self.S[start * X_stride]
-            print '-----------------'
-            print 'arr.shape', arr.shape
-            print 'arr:'
-            print arr
+            #print '-----------------'
+            #print 'S[0]', S[0]
+            #print 'self.S[0]', self.S[0]
+            #print 'S[1]', S[1]
+            #print 'self.S[1]', self.S[1]
+            #print 'start * X_stride', start * X_stride
+            #print 'self.S[start * X_stride]', self.S[start * X_stride]
+            #print '-----------------'
+            #print 'arr.shape', arr.shape
+            #print 'arr:'
+            #print arr
 
             cov = np.cov(arr, rowvar=0, ddof=1)
             mu = np.mean(arr, axis=0)
@@ -615,12 +615,12 @@ cdef class UnsupervisedClassificationCriterion(Criterion):
             mcov = cov
             mmu = mu
             
-            print '-----------------'
-            print 'frac:', frac
-            print 'cov:'
-            print cov
-            print 'mu:'
-            print mu
+            #print '-----------------'
+            #print 'frac:', frac
+            #print 'cov:'
+            #print cov
+            #print 'mu:'
+            #print mu
         
         #!TODO: Does not work, see [...].tree_.value
         memcpy(dest, &frac, sizeof(double))
@@ -1376,14 +1376,14 @@ cdef class Splitter:
 
             if sample_weight != NULL:
                 weighted_n_samples += sample_weight[i]
-                print sample_weight[i]
+                #print sample_weight[i]
             else:
                 weighted_n_samples += 1.0
 
         self.n_samples = j
-        print 'init:N_SAMPLES-posweight:', self.n_samples
+        #print 'init:N_SAMPLES-posweight:', self.n_samples
         self.weighted_n_samples = weighted_n_samples
-        print 'init:weighted_n_samples:', self.weighted_n_samples
+        #print 'init:weighted_n_samples:', self.weighted_n_samples
 
         cdef SIZE_t n_features = X.shape[1]
         cdef SIZE_t* features = safe_realloc(&self.features, n_features)
@@ -1400,7 +1400,7 @@ cdef class Splitter:
         self.y = <DOUBLE_t*> y.data
         self.y_stride = <SIZE_t> y.strides[0] / <SIZE_t> y.itemsize
         self.sample_weight = sample_weight
-        print 'init:N_SAMPLES-methodend:', self.n_samples
+        #print 'init:N_SAMPLES-methodend:', self.n_samples
 
     cdef void node_reset(self, SIZE_t start, SIZE_t end,
                          double* weighted_n_node_samples) nogil:
@@ -1453,9 +1453,9 @@ cdef class BaseDenseSplitter(Splitter):
         """Initialize the splitter."""
 
         # Call parent init
-        print 'bds-init:pre-base-init:', self.n_samples
+        #print 'bds-init:pre-base-init:', self.n_samples
         Splitter.init(self, X, y, sample_weight)
-        print 'bds-init:post-base-init:', self.n_samples
+        #print 'bds-init:post-base-init:', self.n_samples
 
         # Initialize X
         cdef np.ndarray X_ndarray = X
@@ -1463,7 +1463,7 @@ cdef class BaseDenseSplitter(Splitter):
         self.X = <DTYPE_t*> X_ndarray.data
         self.X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
         self.X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
-        print 'bds-init:method-end:', self.n_samples
+        #print 'bds-init:method-end:', self.n_samples
 
 
 cdef class BestSplitter(BaseDenseSplitter):
@@ -1865,7 +1865,7 @@ cdef class UnSupervisedBestSplitter(BestSplitter):
                sizeof(SIZE_t) * n_found_constants)
 
         # Return values
-        with gil: print 'e-best', best.pos, best.feature, best.threshold
+        #with gil: print 'e-best', best.pos, best.feature, best.threshold
         split[0] = best
         n_constant_features[0] = n_total_constants
 
